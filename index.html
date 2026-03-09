@@ -1,0 +1,1773 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SMLB · NEXT360 — Console Qualification Prospect v5</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+  <style>
+    html, body, #root { margin: 0; padding: 0; height: 100%; background: #090D12; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
+
+const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');`;
+
+const C = {
+  black:"#090D12", blackMid:"#111620", blackSurf:"#1A2030", blackBorder:"#242D3A", blackHover:"#2A3448",
+  cyan:"#00C8D7", cyanDim:"rgba(0,200,215,0.10)", cyanBorder:"rgba(0,200,215,0.30)",
+  blue:"#2F5F98", blueDim:"rgba(47,95,152,0.18)", blueBorder:"rgba(47,95,152,0.40)", blueLight:"#4A82C4",
+  white:"#E8EEF5", whiteMid:"#7A8A9A", whiteLight:"#3E4E60",
+  green:"#00C896", greenDim:"rgba(0,200,150,0.14)", amber:"#F0A020", amberDim:"rgba(240,160,32,0.14)",
+  red:"#EF4444", redDim:"rgba(239,68,68,0.14)",
+};
+
+const uid = () => Math.random().toString(36).slice(2,9);
+const fmtEuro = n => new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR",maximumFractionDigits:0}).format(n||0);
+const fmtN = n => new Intl.NumberFormat("fr-FR").format(Math.round(n||0));
+const fmtH = h => { const hh=Math.floor(h),mm=Math.round((h-hh)*60); return mm>0?`${hh}h${mm.toString().padStart(2,"0")}`:`${hh}h`; };
+
+const ETAPES_DEF = [
+  {id:"expression",  label:"Expression du besoin",           shortLabel:"Expr. besoin",  icon:"💬", color:C.cyan},
+  {id:"traitement",  label:"Traitement des Offres",          shortLabel:"Trait. Offres", icon:"⚙️", color:C.blue},
+  {id:"reception",   label:"Réception & transmission",       shortLabel:"Réception",     icon:"📥", color:"#7C3AED"},
+  {id:"livraison",   label:"Livraison & émission commandes", shortLabel:"Livraison",     icon:"📦", color:C.green},
+  {id:"facturation", label:"Déclenchement facturation",      shortLabel:"Facturation",   icon:"🧾", color:C.amber},
+];
+
+const METIERS_TYPE = [
+  {label:"Acheteur",service:"Achats",niveau:0,cout:45000},
+  {label:"Gestionnaire ADV",service:"Administration des Ventes",niveau:0,cout:40000},
+  {label:"Responsable ADV",service:"Administration des Ventes",niveau:1,cout:55000},
+  {label:"Opérateur Marché",service:"Marché & Contrats",niveau:0,cout:42000},
+  {label:"Chargé de Marché",service:"Marché & Contrats",niveau:1,cout:52000},
+  {label:"Contrôleur de Gestion",service:"Finance",niveau:1,cout:58000},
+  {label:"Comptable Fournisseurs",service:"Finance",niveau:0,cout:40000},
+  {label:"Responsable Conformité",service:"Conformité / Juridique",niveau:1,cout:62000},
+  {label:"Juriste Marché Public",service:"Juridique",niveau:1,cout:60000},
+  {label:"Assistant Administratif",service:"Support",niveau:0,cout:32000},
+  {label:"Chef de Projet IT",service:"DSI",niveau:1,cout:65000},
+  {label:"Directeur Achats",service:"Direction",niveau:2,cout:90000},
+];
+
+const OUTILS_CAT = ["SAP","Salesforce","ServiceNow","Ariba","Coupa","Oracle","Dynamics 365","Sage","HubSpot","Zendesk","Excel / Sheets","SharePoint","Teams","Outlook","Jira","Monday.com","Notion","Slack","DocuSign","Chorus","Ivalua"];
+const NIVEAUX = ["Opérateur / N0","Lead / N+1","Manager / N+2","Direction"];
+
+/* ── SIGNAL TAGS COMMERCIAUX ── */
+const SIGNAL_TAGS = [
+  {id:"cout_cache",    label:"Coût caché",              icon:"🔴", color:"#EF4444", bg:"rgba(239,68,68,0.12)"},
+  {id:"fragmentation", label:"Fragmentation",            icon:"🟠", color:"#F97316", bg:"rgba(249,115,22,0.12)"},
+  {id:"dependance",    label:"Dépendance outil",         icon:"🟡", color:"#F0A020", bg:"rgba(240,160,32,0.12)"},
+  {id:"conformite",    label:"Risque conformité",        icon:"🔵", color:"#4A82C4", bg:"rgba(74,130,196,0.12)"},
+  {id:"automatisation",label:"Opportunité auto.",        icon:"🟢", color:"#00C896", bg:"rgba(0,200,150,0.12)"},
+];
+
+/* ── SCORE MATURITÉ ── */
+function computeMaturity({clientNom, volD, volDv, volC, profils, outils, etapesData, qualifData}) {
+  // Signal 1 — Volumétrie connue
+  const nbMetriques = [volD,volDv,volC].filter(v=>v>0).length;
+  const s1 = nbMetriques===3?"green":nbMetriques>0?"orange":"red";
+
+  // Signal 2 — Processus formalisé
+  const etapesOk = ETAPES_DEF.filter(e=>{
+    const sc=(etapesData[e.id]||{}).scenarios||[];
+    return sc.length>0 && Math.abs(sc.reduce((a,s)=>a+(s.pct||0),0)-100)<1;
+  }).length;
+  const s2 = etapesOk>=3?"green":etapesOk>=1?"orange":"red";
+
+  // Signal 3 — Coûts identifiés
+  const hasProfil = profils.some(p=>p.cout>0);
+  const hasOutil  = outils.some(o=>o.cout>0);
+  const s3 = (hasProfil&&hasOutil)?"green":(hasProfil||hasOutil)?"orange":"red";
+
+  // Signal 4 — Douleurs exprimées (tags OU observations)
+  const allTags = ETAPES_DEF.flatMap(e=>(etapesData[e.id]||{}).signalTags||[]);
+  const hasNotes = ETAPES_DEF.some(e=>(etapesData[e.id]||{}).note?.length>10);
+  const s4 = allTags.length>0?"green":hasNotes?"orange":"red";
+
+  const scores = [s1,s2,s3,s4];
+  const greens = scores.filter(s=>s==="green").length;
+  const level = greens===4?"Qualifié":greens>=3?"Structuré":greens>=1?"En cours":"Immature";
+  const levelColor = greens===4?C.green:greens>=3?C.cyan:greens>=1?C.amber:C.red;
+  return {scores, level, levelColor, greens};
+}
+
+const MATURITY_LABELS = ["Volumétrie connue","Processus formalisé","Coûts identifiés","Douleurs exprimées"];
+const SIGNAL_COLORS = {green:C.green, orange:C.amber, red:C.red};
+
+/* ── CARD & PAGEHEAD — définis hors composant pour éviter le remontage DOM ── */
+const Card = ({children, style={}}) => (
+  <div style={{background:C.blackMid, border:`1px solid ${C.blackBorder}`, borderRadius:"10px", padding:"20px", ...style}}>
+    {children}
+  </div>
+);
+
+const PageHead = ({title, sub}) => (
+  <div style={{marginBottom:"22px"}}>
+    <div style={{fontSize:"22px", fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.02em", color:C.white}}>{title}</div>
+    {sub && <div style={{fontSize:"13px", color:C.whiteMid, marginTop:"2px"}}>{sub}</div>}
+  </div>
+);
+
+/* ── ATOMS ── */
+const Lbl = ({children,style={}}) => <div style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.09em",textTransform:"uppercase",color:C.whiteMid,marginBottom:"6px",fontFamily:"'Barlow Condensed',sans-serif",...style}}>{children}</div>;
+
+const TInput = ({value,onChange,placeholder,style={}}) => (
+  <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+    style={{width:"100%",padding:"8px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"13px",color:C.white,background:C.blackSurf,fontFamily:"'Barlow',sans-serif",outline:"none",...style}}/>
+);
+
+const NInput = ({value,onChange,min=0,max=9999999,step=1,style={}}) => (
+  <input type="number" value={value} min={min} max={max} step={step} onChange={e=>onChange(Number(e.target.value))}
+    style={{padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"13px",fontFamily:"'DM Mono',monospace",color:C.white,background:C.blackSurf,outline:"none",textAlign:"right",...style}}/>
+);
+
+const Tag = ({children,color=C.cyan,bg}) => (
+  <span style={{display:"inline-flex",alignItems:"center",padding:"2px 8px",borderRadius:"3px",fontSize:"10px",fontWeight:700,letterSpacing:"0.04em",color,background:bg||`${color}18`,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{children}</span>
+);
+
+/* ── PCT CONTROL ── */
+function PctCtrl({value,onChange,color=C.cyan,label,tooltip}) {
+  return (
+    <div style={{marginBottom:"10px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"5px"}}>
+          <span style={{fontSize:"12px",color:C.whiteMid}}>{label}</span>
+          {tooltip && (
+            <div style={{position:"relative",display:"inline-block"}} className="tt-wrap">
+              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:"14px",height:"14px",borderRadius:"50%",background:C.blackHover,color:C.whiteMid,fontSize:"9px",fontWeight:700,cursor:"help",border:`1px solid ${C.blackBorder}`}}>?</span>
+              <div className="tt-box" style={{position:"absolute",left:"18px",top:"-4px",width:"210px",padding:"8px 10px",background:C.blackMid,border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"11px",color:C.whiteMid,lineHeight:1.5,zIndex:999,pointerEvents:"none",display:"none"}}>{tooltip}</div>
+            </div>
+          )}
+        </div>
+        <input type="number" value={value} min={0} max={100} step={5} onChange={e=>onChange(Math.min(100,Math.max(0,Number(e.target.value))))}
+          style={{width:"50px",padding:"3px 6px",border:`1px solid ${C.blackBorder}`,borderRadius:"5px",fontSize:"12px",fontFamily:"'DM Mono',monospace",color,background:C.blackSurf,outline:"none",textAlign:"center"}}/>
+      </div>
+      <div style={{position:"relative",height:"5px",background:C.blackBorder,borderRadius:"3px",overflow:"hidden"}}>
+        <div style={{position:"absolute",left:0,top:0,height:"100%",width:`${value}%`,background:`linear-gradient(90deg,${color},${color}88)`,borderRadius:"3px",transition:"width 0.2s"}}/>
+        <input type="range" min={0} max={100} step={5} value={value} onChange={e=>onChange(Number(e.target.value))}
+          style={{position:"absolute",inset:0,opacity:0,width:"100%",cursor:"pointer",margin:0}}/>
+      </div>
+    </div>
+  );
+}
+
+/* ── MODAL ── */
+function Modal({title,onClose,children,width="520px"}) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
+      <div style={{width,maxHeight:"88vh",overflowY:"auto",background:C.blackMid,border:`1px solid ${C.blackBorder}`,borderRadius:"12px",boxShadow:"0 24px 64px rgba(0,0,0,0.7)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",borderBottom:`1px solid ${C.blackBorder}`}}>
+          <span style={{fontSize:"15px",fontWeight:800,color:C.white,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.05em"}}>{title}</span>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.whiteMid,fontSize:"22px",cursor:"pointer",lineHeight:1}}>×</button>
+        </div>
+        <div style={{padding:"20px"}}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ── MODAL PROFIL ── */
+function ModalProfil({onAdd,onClose}) {
+  const [tab,setTab] = useState("type");
+  const [c,setC] = useState({label:"",service:"",niveau:0,cout:45000,effectif:1,pctMarche:80,disponibilite:70,fragmentation:15});
+  return (
+    <Modal title="Ajouter un profil mobilisé" onClose={onClose} width="600px">
+      <div style={{display:"flex",gap:"4px",marginBottom:"16px"}}>
+        {[["type","Métiers types"],["custom","Personnalisé"]].map(([id,lbl])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{padding:"6px 16px",borderRadius:"5px",border:"none",cursor:"pointer",fontSize:"12px",fontWeight:700,background:tab===id?C.cyan:C.blackSurf,color:tab===id?C.black:C.whiteMid,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>{lbl}</button>
+        ))}
+      </div>
+      {tab==="type" && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px"}}>
+          {METIERS_TYPE.map(m=>(
+            <button key={m.label} onClick={()=>{onAdd({id:uid(),...m,effectif:1,pctMarche:80,disponibilite:70,fragmentation:15});onClose();}}
+              style={{padding:"10px 14px",textAlign:"left",background:C.blackSurf,border:`1px solid ${C.blackBorder}`,borderRadius:"8px",cursor:"pointer",transition:"all 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.cyan;e.currentTarget.style.background=C.cyanDim;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.blackBorder;e.currentTarget.style.background=C.blackSurf;}}>
+              <div style={{fontSize:"13px",fontWeight:700,color:C.white,fontFamily:"'Barlow',sans-serif"}}>{m.label}</div>
+              <div style={{fontSize:"11px",color:C.whiteMid,marginTop:"2px"}}>{m.service} · {fmtEuro(m.cout)}/an</div>
+            </button>
+          ))}
+        </div>
+      )}
+      {tab==="custom" && (
+        <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
+            <div><Lbl>Intitulé</Lbl><TInput value={c.label} onChange={v=>setC(x=>({...x,label:v}))} placeholder="Ex : Gestionnaire ADV"/></div>
+            <div><Lbl>Service</Lbl><TInput value={c.service} onChange={v=>setC(x=>({...x,service:v}))} placeholder="Ex : Finance"/></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"12px"}}>
+            <div><Lbl>Effectif</Lbl><NInput value={c.effectif} onChange={v=>setC(x=>({...x,effectif:v}))} min={1} max={100} style={{width:"100%"}}/></div>
+            <div><Lbl>Coût annuel chargé (€)</Lbl><NInput value={c.cout} onChange={v=>setC(x=>({...x,cout:v}))} min={20000} max={200000} step={2500} style={{width:"100%"}}/></div>
+            <div><Lbl>Niveau</Lbl>
+              <select value={c.niveau} onChange={e=>setC(x=>({...x,niveau:Number(e.target.value)}))} style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"13px",background:C.blackSurf,color:C.white}}>
+                {NIVEAUX.map((n,i)=><option key={i} value={i}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+          <PctCtrl value={c.pctMarche} onChange={v=>setC(x=>({...x,pctMarche:v}))} color={C.cyan} label="% temps alloué au marché"/>
+          <PctCtrl value={c.disponibilite} onChange={v=>setC(x=>({...x,disponibilite:v}))} color={C.green} label="Disponibilité effective"/>
+          <PctCtrl value={c.fragmentation} onChange={v=>setC(x=>({...x,fragmentation:v}))} color={C.amber} label="Perte fragmentation / context-switching"
+            tooltip="3h planifiées ≠ 3h travaillées d'affilée. Ce coefficient capture interruptions, changements de contexte et temps non-productifs."/>
+          <button onClick={()=>{if(c.label){onAdd({id:uid(),...c});onClose();}}} style={{padding:"10px",background:C.cyan,color:C.black,border:"none",borderRadius:"7px",fontWeight:700,fontSize:"13px",cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>Ajouter ce profil</button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ── MODAL OUTIL ── */
+function ModalOutil({onAdd,onClose}) {
+  const [nom,setNom] = useState(""); const [cout,setCout] = useState(0); const [perio,setPerio] = useState("utilisateur");
+  const [util,setUtil] = useState(1); const [etapes,setEtapes] = useState([]); const [sug,setSug] = useState(false);
+  const toggle = id => setEtapes(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const coutM = perio==="an"?cout*util/12:perio==="utilisateur"?cout*util:cout;
+  return (
+    <Modal title="Ajouter un outil" onClose={onClose} width="520px">
+      <div style={{display:"flex",flexDirection:"column",gap:"14px"}}>
+        <div style={{position:"relative"}}>
+          <Lbl>Nom de l'outil</Lbl>
+          <TInput value={nom} onChange={v=>{setNom(v);setSug(true);}} placeholder="Ex : SAP, Salesforce…"/>
+          {sug && nom.length>0 && (
+            <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.blackMid,border:`1px solid ${C.blackBorder}`,borderRadius:"6px",zIndex:200,maxHeight:"140px",overflowY:"auto"}}>
+              {OUTILS_CAT.filter(o=>o.toLowerCase().includes(nom.toLowerCase())&&o!==nom).slice(0,6).map(s=>(
+                <div key={s} onMouseDown={()=>{setNom(s);setSug(false);}}
+                  style={{padding:"8px 12px",fontSize:"12px",color:C.white,cursor:"pointer",borderBottom:`1px solid ${C.blackBorder}`}}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.blackHover}
+                  onMouseLeave={e=>e.currentTarget.style.background="transparent"}>{s}</div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px"}}>
+          <div><Lbl>Coût unitaire (€)</Lbl><NInput value={cout} onChange={setCout} min={0} max={100000} step={10} style={{width:"100%"}}/></div>
+          <div><Lbl>Périodicité</Lbl>
+            <select value={perio} onChange={e=>setPerio(e.target.value)} style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"13px",background:C.blackSurf,color:C.white}}>
+              <option value="utilisateur">/util./mois</option><option value="mois">/mois fixe</option><option value="an">/an (÷12)</option>
+            </select>
+          </div>
+          <div><Lbl>Nb utilisateurs</Lbl><NInput value={util} onChange={setUtil} min={1} max={1000} style={{width:"100%"}}/></div>
+        </div>
+        <div style={{padding:"10px 12px",background:C.cyanDim,borderRadius:"6px",border:`1px solid ${C.cyanBorder}`,display:"flex",justifyContent:"space-between"}}>
+          <span style={{fontSize:"12px",color:C.cyan}}>Coût mensuel calculé</span>
+          <span style={{fontSize:"16px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:C.cyan}}>{fmtEuro(coutM)}/mois</span>
+        </div>
+        <div>
+          <Lbl>Étapes concernées</Lbl>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginTop:"4px"}}>
+            <div onClick={()=>setEtapes([])} style={{padding:"8px 10px",borderRadius:"6px",border:`1px solid ${etapes.length===0?C.cyan:C.blackBorder}`,background:etapes.length===0?C.cyanDim:C.blackSurf,cursor:"pointer",display:"flex",alignItems:"center",gap:"8px"}}>
+              <div style={{width:"14px",height:"14px",borderRadius:"3px",border:`2px solid ${etapes.length===0?C.cyan:C.blackBorder}`,background:etapes.length===0?C.cyan:"transparent",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {etapes.length===0&&<span style={{color:C.black,fontSize:"9px",fontWeight:900}}>✓</span>}
+              </div>
+              <span style={{fontSize:"11px",color:etapes.length===0?C.cyan:C.whiteMid}}>Toutes les étapes</span>
+            </div>
+            {ETAPES_DEF.map(e=>{
+              const sel=etapes.includes(e.id);
+              return (
+                <div key={e.id} onClick={()=>toggle(e.id)} style={{padding:"8px 10px",borderRadius:"6px",border:`1px solid ${sel?e.color:C.blackBorder}`,background:sel?`${e.color}18`:C.blackSurf,cursor:"pointer",display:"flex",alignItems:"center",gap:"8px"}}>
+                  <div style={{width:"14px",height:"14px",borderRadius:"3px",border:`2px solid ${sel?e.color:C.blackBorder}`,background:sel?e.color:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    {sel&&<span style={{color:C.black,fontSize:"9px",fontWeight:900}}>✓</span>}
+                  </div>
+                  <span style={{fontSize:"11px",color:sel?e.color:C.whiteMid}}>{e.shortLabel}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <button onClick={()=>{if(nom){onAdd({id:uid(),nom,cout,periodicite:perio,utilisateurs:util,etapes});onClose();}}}
+          style={{padding:"10px",background:C.cyan,color:C.black,border:"none",borderRadius:"7px",fontWeight:700,fontSize:"13px",cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>
+          Ajouter cet outil
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ── HELPERS SCÉNARIOS ── */
+const SCENARIO_DEF = () => ({label:"Cas nominal",temps:30,pct:100});
+function tempsPondere(scenarios) {
+  const total = scenarios.reduce((a,s)=>a+(s.pct||0),0);
+  if(!total) return 0;
+  return scenarios.reduce((a,s)=>a+(s.temps||0)*(s.pct||0),0)/total;
+}
+
+/* ── ETAPE BLOCK v5 ── */
+function EtapeBlock({etape,data,onChange,allProfils,allOutils}) {
+  const [open,setOpen] = useState(false);
+  const [tab,setTab] = useState("scenarios"); // scenarios | ressources | conformite
+
+  const DEF_SCENARIOS = [{label:"Cas nominal",temps:30,pct:70},{label:"Anomalie détectée",temps:60,pct:20},{label:"Contrôle inopiné",temps:90,pct:10}];
+  const DEF_CONF = {active:false,taux:5,tempsBase:0,tempsSup:0,interlocuteurs:[],note:""};
+
+  const d = data || {
+    scenarios: DEF_SCENARIOS,
+    tauxConversion:100, profils:[], outils:[], note:"", serviceNote:"",
+    conformiteN1: {...DEF_CONF},
+    conformiteN2: {...DEF_CONF, taux:1},
+  };
+  const upd = p => onChange({...d,...p});
+  const updC = (lv,p) => upd({[`conformite${lv}`]:{...d[`conformite${lv}`],...p}});
+
+  const scenarios = d.scenarios || DEF_SCENARIOS;
+  const pa = d.profils||[]; const oa = d.outils||[];
+  const hasAlert = d.note?.includes("!");
+  const hasConfo = d.conformiteN1?.active || d.conformiteN2?.active;
+  const tpMoyen = tempsPondere(scenarios);
+  const totalPct = scenarios.reduce((a,s)=>a+(s.pct||0),0);
+  const pctOk = Math.abs(totalPct-100)<1;
+
+  // Scénario helpers
+  const updScen = (i,p) => upd({scenarios: scenarios.map((s,idx)=>idx===i?{...s,...p}:s)});
+  const addScen = () => upd({scenarios:[...scenarios,{label:"Nouveau cas",temps:30,pct:0}]});
+  const delScen = i => upd({scenarios: scenarios.filter((_,idx)=>idx!==i)});
+
+  const TABS = [["scenarios","⏱ Scénarios"],["ressources","👤 Ressources"],["conformite","⚠ Conformité"]];
+
+  return (
+    <div style={{border:`1px solid ${open?etape.color+"55":C.blackBorder}`,borderRadius:"10px",overflow:"hidden",marginBottom:"8px"}}>
+      {/* Header accordéon */}
+      <div onClick={()=>setOpen(!open)} style={{display:"flex",alignItems:"center",gap:"12px",padding:"12px 16px",background:open?`${etape.color}08`:C.blackMid,cursor:"pointer",userSelect:"none"}}>
+        <div style={{width:"34px",height:"34px",borderRadius:"8px",background:`${etape.color}20`,border:`1px solid ${etape.color}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>{etape.icon}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:"13px",fontWeight:700,color:C.white,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>{etape.label}</div>
+          <div style={{display:"flex",gap:"4px",marginTop:"3px",flexWrap:"wrap"}}>
+            {pa.map(x=>{const p=allProfils.find(q=>q.id===x.id);return p?<Tag key={x.id} color={etape.color}>{p.label}</Tag>:null;})}
+            {oa.map(oid=>{const o=allOutils.find(x=>x.id===oid);return o?<Tag key={oid} color={C.blue} bg={C.blueDim}>{o.nom}</Tag>:null;})}
+            {hasConfo&&<Tag color={C.amber} bg={C.amberDim}>⚠ Conformité</Tag>}
+            {!pa.length&&!oa.length&&!hasConfo&&<span style={{fontSize:"11px",color:C.whiteLight,fontStyle:"italic"}}>Aucune ressource assignée</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+          {tpMoyen>0&&<Tag color={C.cyan} bg={C.cyanDim}>⌀ {fmtH(tpMoyen/60)}</Tag>}
+          {!pctOk&&scenarios.length>0&&<Tag color={C.amber} bg={C.amberDim}>Σ≠100%</Tag>}
+          {d.tauxConversion<100&&<Tag color={etape.color}>{d.tauxConversion}%</Tag>}
+          {hasAlert&&<span title="Point bloquant">⚠️</span>}
+          <span style={{color:C.whiteLight,fontSize:"11px"}}>{open?"▲":"▼"}</span>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{background:C.black,borderTop:`1px solid ${C.blackBorder}`}}>
+          {/* Tabs */}
+          <div style={{display:"flex",gap:"2px",padding:"10px 18px 0",borderBottom:`1px solid ${C.blackBorder}`}}>
+            {TABS.map(([id,lbl])=>(
+              <button key={id} onClick={()=>setTab(id)}
+                style={{padding:"7px 16px",border:"none",borderBottom:tab===id?`2px solid ${etape.color}`:"2px solid transparent",background:"transparent",color:tab===id?etape.color:C.whiteMid,fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em",transition:"all 0.15s",marginBottom:"-1px"}}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          <div style={{padding:"18px"}}>
+
+            {/* ── TAB SCÉNARIOS ── */}
+            {tab==="scenarios" && (
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px"}}>
+                  {/* Scénarios */}
+                  <div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}>
+                      <Lbl style={{margin:0}}>Scénarios de traitement</Lbl>
+                      <button onClick={addScen} style={{padding:"3px 10px",background:C.blackSurf,border:`1px solid ${C.blackBorder}`,borderRadius:"5px",color:C.cyan,fontSize:"11px",cursor:"pointer",fontWeight:700}}>+ Cas</button>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+                      {scenarios.map((s,i)=>(
+                        <div key={i} style={{padding:"10px 12px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                          <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"8px"}}>
+                            <input value={s.label} onChange={e=>updScen(i,{label:e.target.value})}
+                              style={{flex:1,padding:"4px 8px",background:C.black,border:`1px solid ${C.blackBorder}`,borderRadius:"5px",fontSize:"12px",color:C.white,outline:"none",fontFamily:"'Barlow',sans-serif"}}/>
+                            {scenarios.length>1&&<button onClick={()=>delScen(i)} style={{background:"none",border:"none",cursor:"pointer",color:C.whiteLight,fontSize:"14px",lineHeight:1,padding:"0 2px"}}>×</button>}
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+                            <div>
+                              <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"3px"}}>Durée (min)</div>
+                              <NInput value={s.temps} onChange={v=>updScen(i,{temps:v})} min={0} max={480} step={5}
+                                style={{width:"100%",fontSize:"14px",fontWeight:700,color:etape.color}}/>
+                            </div>
+                            <div>
+                              <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"3px"}}>Fréquence (%)</div>
+                              <NInput value={s.pct} onChange={v=>updScen(i,{pct:Math.min(100,Math.max(0,v))})} min={0} max={100} step={5}
+                                style={{width:"100%",fontSize:"14px",fontWeight:700,color:pctOk?C.cyan:C.amber}}/>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{marginTop:"8px",padding:"8px 12px",background:pctOk?C.cyanDim:C.amberDim,borderRadius:"7px",border:`1px solid ${pctOk?C.cyanBorder:C.amber+"40"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:"11px",color:pctOk?C.cyan:C.amber}}>
+                        {pctOk?"✓ Distribution valide":`⚠ Total : ${totalPct}% (doit faire 100%)`}
+                      </span>
+                      <span style={{fontSize:"13px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:pctOk?C.cyan:C.amber}}>
+                        ⌀ {fmtH(tpMoyen/60)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Droite : taux conversion + notes */}
+                  <div>
+                    <Lbl>Taux de transformation</Lbl>
+                    <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"8px"}}>
+                      <input type="range" min={0} max={100} step={1} value={d.tauxConversion??100} onChange={e=>upd({tauxConversion:Number(e.target.value)})} style={{flex:1,accentColor:etape.color,cursor:"pointer"}}/>
+                      <input type="number" value={d.tauxConversion??100} min={0} max={100}
+                        onChange={e=>upd({tauxConversion:Math.min(100,Math.max(0,Number(e.target.value)))})}
+                        style={{width:"52px",padding:"4px 6px",border:`1px solid ${C.blackBorder}`,borderRadius:"5px",fontSize:"13px",fontFamily:"'DM Mono',monospace",color:etape.color,background:C.blackSurf,outline:"none",textAlign:"center",fontWeight:800}}/>
+                      <span style={{fontSize:"12px",color:C.whiteLight}}>%</span>
+                    </div>
+                    {(d.tauxConversion??100)<100&&(
+                      <div style={{padding:"6px 10px",background:C.amberDim,borderRadius:"6px",border:`1px solid ${C.amber}40`,fontSize:"11px",color:C.amber,marginBottom:"10px"}}>
+                        ⚠ {100-(d.tauxConversion??100)}% de dossiers non convertis à cette étape
+                      </div>
+                    )}
+                    <Lbl style={{marginTop:"10px"}}>Observations</Lbl>
+                    <textarea value={d.note||""} onChange={e=>upd({note:e.target.value})}
+                      placeholder={"Points de friction… (ajoutez '!' pour marquer un point bloquant)"} rows={4}
+                      style={{width:"100%",padding:"8px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",color:C.white,background:C.blackSurf,lineHeight:1.6,resize:"vertical",fontFamily:"'Barlow',sans-serif"}}/>
+                    <Lbl style={{marginTop:"10px"}}>Signaux commerciaux</Lbl>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
+                      {SIGNAL_TAGS.map(t=>{
+                        const active=(d.signalTags||[]).includes(t.id);
+                        return (
+                          <button key={t.id} onClick={()=>{
+                            const cur=d.signalTags||[];
+                            upd({signalTags:active?cur.filter(x=>x!==t.id):[...cur,t.id]});
+                          }} style={{display:"flex",alignItems:"center",gap:"5px",padding:"5px 10px",borderRadius:"5px",border:`1px solid ${active?t.color:C.blackBorder}`,background:active?t.bg:C.blackSurf,color:active?t.color:C.whiteMid,fontSize:"11px",fontWeight:active?700:400,cursor:"pointer",transition:"all 0.15s",fontFamily:"'Barlow',sans-serif"}}>
+                            <span>{t.icon}</span>{t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB RESSOURCES ── */}
+            {tab==="ressources" && (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px"}}>
+                {/* Interlocuteurs */}
+                <div>
+                  <Lbl>Interlocuteurs assignés</Lbl>
+                  <select onChange={e=>{const pid=e.target.value;if(pid&&!pa.find(p=>p.id===pid)){upd({profils:[...pa,{id:pid,pctTemps:100}]});}e.target.value="";}}
+                    style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",background:C.blackSurf,color:C.white,marginBottom:"10px"}}>
+                    <option value="">+ Assigner un profil…</option>
+                    {allProfils.map(p=><option key={p.id} value={p.id}>{p.label} — {p.service||"—"}</option>)}
+                  </select>
+                  {!pa.length&&<p style={{fontSize:"12px",color:C.whiteLight,fontStyle:"italic"}}>Aucun profil assigné</p>}
+                  {pa.map(x=>{
+                    const p=allProfils.find(q=>q.id===x.id);if(!p)return null;
+                    const chargeH = tpMoyen/60 * (x.pctTemps/100);
+                    const capJour = 8*(p.pctMarche/100)*(Math.max(0,p.disponibilite-p.fragmentation)/100);
+                    return (
+                      <div key={x.id} style={{padding:"10px 12px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`,marginBottom:"8px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"6px"}}>
+                          <div>
+                            <div style={{fontSize:"12px",fontWeight:700,color:C.white}}>{p.label}</div>
+                            <div style={{fontSize:"10px",color:C.whiteLight}}>{p.service||"—"} · {NIVEAUX[p.niveau]}</div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:"6px"}}>
+                            <Tag color={etape.color} bg={`${etape.color}15`}>{fmtH(chargeH)}/dossier</Tag>
+                            <button onClick={()=>upd({profils:pa.filter(q=>q.id!==x.id)})} style={{background:"none",border:"none",cursor:"pointer",color:C.whiteLight,fontSize:"16px",lineHeight:1}}>×</button>
+                          </div>
+                        </div>
+                        <PctCtrl value={x.pctTemps} onChange={v=>upd({profils:pa.map(q=>q.id===x.id?{...q,pctTemps:v}:q)})} color={etape.color} label="% du temps de l'étape"/>
+                      </div>
+                    );
+                  })}
+                  <div style={{marginTop:"8px"}}>
+                    <Lbl>Service / département</Lbl>
+                    <TInput value={d.serviceNote||""} onChange={v=>upd({serviceNote:v})} placeholder="Ex : Direction Achats, DSI…"/>
+                  </div>
+                </div>
+                {/* Outils */}
+                <div>
+                  <Lbl>Outils utilisés</Lbl>
+                  <select onChange={e=>{const oid=e.target.value;if(oid&&!oa.includes(oid)){upd({outils:[...oa,oid]});}e.target.value="";}}
+                    style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",background:C.blackSurf,color:C.white,marginBottom:"10px"}}>
+                    <option value="">+ Ajouter un outil…</option>
+                    {allOutils.map(o=><option key={o.id} value={o.id}>{o.nom}</option>)}
+                  </select>
+                  {!oa.length&&<p style={{fontSize:"12px",color:C.whiteLight,fontStyle:"italic"}}>Aucun outil affecté</p>}
+                  <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>
+                    {oa.map(oid=>{const o=allOutils.find(x=>x.id===oid);return o?(
+                      <span key={oid} style={{display:"inline-flex",alignItems:"center",gap:"4px",padding:"4px 10px",borderRadius:"5px",fontSize:"11px",color:C.blueLight,background:C.blueDim,border:`1px solid ${C.blueBorder}`,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700,letterSpacing:"0.03em"}}>
+                        {o.nom}<button onClick={()=>upd({outils:oa.filter(x=>x!==oid)})} style={{background:"none",border:"none",cursor:"pointer",color:C.blueLight,fontSize:"13px",lineHeight:1,padding:0,marginLeft:"3px"}}>×</button>
+                      </span>
+                    ):null;})}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── TAB CONFORMITÉ ── */}
+            {tab==="conformite" && (
+              <div>
+                <div style={{marginBottom:"12px",padding:"10px 14px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`,fontSize:"12px",color:C.whiteMid,lineHeight:1.6}}>
+                  Définissez la fréquence de déclenchement de chaque contrôle. Le temps moyen pondéré de l'étape intégrera automatiquement ces contrôles proportionnellement à leur taux.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px"}}>
+                  {["N1","N2"].map(lv=>{
+                    const cf = d[`conformite${lv}`]||{...DEF_CONF,taux:lv==="N1"?5:1};
+                    const isN2 = lv==="N2";
+                    return (
+                      <div key={lv} style={{border:`1px solid ${cf.active?C.amber+"66":C.blackBorder}`,borderRadius:"10px",overflow:"hidden"}}>
+                        {/* Toggle header */}
+                        <div style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",background:cf.active?C.amberDim:C.blackSurf,cursor:"pointer"}} onClick={()=>updC(lv,{active:!cf.active})}>
+                          <div style={{width:"20px",height:"20px",borderRadius:"5px",border:`2px solid ${cf.active?C.amber:C.blackBorder}`,background:cf.active?C.amber:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                            {cf.active&&<span style={{color:C.black,fontSize:"11px",fontWeight:900}}>✓</span>}
+                          </div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:"12px",fontWeight:700,color:cf.active?C.amber:C.whiteMid,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.05em"}}>CONTRÔLE {lv} — {isN2?"Approfondi":"Standard"}</div>
+                            {cf.active&&<div style={{fontSize:"10px",color:C.amber,marginTop:"1px"}}>{cf.taux}% des dossiers · +{fmtH(cf.tempsBase/60)} par déclenchement</div>}
+                          </div>
+                        </div>
+                        {cf.active&&(
+                          <div style={{padding:"14px",background:C.black,display:"flex",flexDirection:"column",gap:"10px"}}>
+                            {/* Taux déclenchement */}
+                            <div style={{padding:"10px 12px",background:C.amberDim,borderRadius:"7px",border:`1px solid ${C.amber}40`}}>
+                              <div style={{fontSize:"9px",color:C.amber,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"6px",fontWeight:700}}>Taux de déclenchement</div>
+                              <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                                <input type="range" min={0} max={100} step={1} value={cf.taux||0} onChange={e=>updC(lv,{taux:Number(e.target.value)})} style={{flex:1,accentColor:C.amber,cursor:"pointer"}}/>
+                                <input type="number" value={cf.taux||0} min={0} max={100} onChange={e=>updC(lv,{taux:Math.min(100,Math.max(0,Number(e.target.value)))})}
+                                  style={{width:"52px",padding:"4px 6px",border:`1px solid ${C.amber}40`,borderRadius:"5px",fontSize:"13px",fontFamily:"'DM Mono',monospace",color:C.amber,background:C.black,outline:"none",textAlign:"center",fontWeight:800}}/>
+                                <span style={{fontSize:"11px",color:C.amber}}>%</span>
+                              </div>
+                              <div style={{fontSize:"10px",color:C.amber,marginTop:"5px",opacity:0.8}}>
+                                = {cf.taux||0} dossier{(cf.taux||0)>1?"s":"s"} sur 100 déclenchent ce contrôle
+                              </div>
+                            </div>
+                            {/* Temps */}
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+                              {[["Durée base (min)",(cf.tempsBase||0),v=>updC(lv,{tempsBase:v})],["Durée max (min)",(cf.tempsSup||0),v=>updC(lv,{tempsSup:v})]].map(([lbl,val,setter])=>(
+                                <div key={lbl}>
+                                  <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"4px"}}>{lbl}</div>
+                                  <NInput value={val} onChange={setter} min={0} max={480} step={5} style={{width:"100%"}}/>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Interlocuteurs */}
+                            <div>
+                              <Lbl>Interlocuteurs conformité</Lbl>
+                              <select onChange={e=>{const pid=e.target.value;if(pid&&!cf.interlocuteurs.includes(pid)){updC(lv,{interlocuteurs:[...cf.interlocuteurs,pid]});}e.target.value="";}}
+                                style={{width:"100%",padding:"6px 8px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"11px",background:C.blackSurf,color:C.white,marginBottom:"6px"}}>
+                                <option value="">+ Assigner…</option>
+                                {allProfils.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+                              </select>
+                              <div style={{display:"flex",flexWrap:"wrap",gap:"4px"}}>
+                                {(cf.interlocuteurs||[]).map(pid=>{const p=allProfils.find(x=>x.id===pid);return p?(
+                                  <span key={pid} style={{display:"inline-flex",alignItems:"center",gap:"3px",padding:"2px 8px",background:C.amberDim,border:`1px solid ${C.amber}40`,borderRadius:"4px",fontSize:"10px",color:C.amber,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>
+                                    {p.label}<button onClick={()=>updC(lv,{interlocuteurs:cf.interlocuteurs.filter(x=>x!==pid)})} style={{background:"none",border:"none",cursor:"pointer",color:C.amber,fontSize:"12px",lineHeight:1,padding:0}}>×</button>
+                                  </span>
+                                ):null;})}
+                              </div>
+                            </div>
+                            {/* Notes */}
+                            <textarea value={cf.note||""} onChange={e=>updC(lv,{note:e.target.value})} placeholder={`Notes contrôle ${lv}…`} rows={2}
+                              style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"11px",color:C.white,background:C.blackSurf,lineHeight:1.5,resize:"vertical",fontFamily:"'Barlow',sans-serif"}}/>
+                            {/* Impact calculé */}
+                            <div style={{padding:"7px 10px",background:C.amberDim,borderRadius:"6px",border:`1px solid ${C.amber}40`,fontSize:"11px",color:C.amber,display:"flex",justifyContent:"space-between"}}>
+                              <span>Impact sur temps moyen de l'étape</span>
+                              <strong>+{fmtH((cf.tempsBase||0)*(cf.taux||0)/100/60)}</strong>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── QUALIFICATION OPTIONNELLE ── */
+function QualifBlock({data, onChange, allProfils, allOutils}) {
+  const [open,setOpen] = useState(false);
+  const d = data || {active:false, taux:30, scenarios:[{label:"Standard",temps:60,pct:70},{label:"Complexe",temps:90,pct:30}], profils:[], outils:[], note:""};
+  const upd = p => onChange({...d,...p});
+  const scenarios = d.scenarios||[];
+  const tpMoyen = tempsPondere(scenarios);
+  const totalPct = scenarios.reduce((a,s)=>a+(s.pct||0),0);
+  const pctOk = Math.abs(totalPct-100)<1;
+  const updScen = (i,p) => upd({scenarios:scenarios.map((s,idx)=>idx===i?{...s,...p}:s)});
+
+  return (
+    <div style={{border:`2px dashed ${d.active?C.blueLight+"66":C.blackBorder}`,borderRadius:"10px",overflow:"hidden",marginBottom:"8px"}}>
+      <div onClick={()=>setOpen(!open)} style={{display:"flex",alignItems:"center",gap:"12px",padding:"12px 16px",background:d.active?C.blueDim:C.blackMid,cursor:"pointer",userSelect:"none"}}>
+        <div style={{width:"34px",height:"34px",borderRadius:"8px",background:d.active?C.blueDim:`${C.blackBorder}`,border:`1px solid ${d.active?C.blueLight:C.blackBorder}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>🔍</div>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+            <span style={{fontSize:"13px",fontWeight:700,color:d.active?C.blueLight:C.whiteMid,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>QUALIFICATION COMPLÉMENTAIRE</span>
+            <Tag color={C.blue} bg={C.blueDim}>Optionnelle</Tag>
+            {d.active&&<Tag color={C.blueLight} bg={C.blueDim}>{d.taux}% des demandes</Tag>}
+          </div>
+          <div style={{fontSize:"11px",color:C.whiteLight,marginTop:"2px"}}>Sous-étape conditionnelle rattachée à l'expression du besoin</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+          {/* Toggle actif */}
+          <div onClick={e=>{e.stopPropagation();upd({active:!d.active});}}
+            style={{width:"36px",height:"20px",borderRadius:"10px",background:d.active?C.blueLight:C.blackBorder,position:"relative",cursor:"pointer",transition:"background 0.2s",flexShrink:0}}>
+            <div style={{position:"absolute",top:"2px",left:d.active?"18px":"2px",width:"16px",height:"16px",borderRadius:"50%",background:"white",transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.4)"}}/>
+          </div>
+          {d.active&&tpMoyen>0&&<Tag color={C.blueLight} bg={C.blueDim}>⌀ {fmtH(tpMoyen/60)}</Tag>}
+          <span style={{color:C.whiteLight,fontSize:"11px"}}>{open?"▲":"▼"}</span>
+        </div>
+      </div>
+
+      {open && d.active && (
+        <div style={{padding:"18px",background:C.black,borderTop:`1px solid ${C.blackBorder}`}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px"}}>
+            <div>
+              {/* Taux déclenchement */}
+              <div style={{padding:"12px 14px",background:C.blueDim,borderRadius:"8px",border:`1px solid ${C.blueBorder}`,marginBottom:"12px"}}>
+                <div style={{fontSize:"9px",color:C.blueLight,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700,marginBottom:"6px"}}>Taux de déclenchement</div>
+                <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                  <input type="range" min={0} max={100} step={5} value={d.taux||0} onChange={e=>upd({taux:Number(e.target.value)})} style={{flex:1,accentColor:C.blueLight,cursor:"pointer"}}/>
+                  <input type="number" value={d.taux||0} min={0} max={100}
+                    onChange={e=>upd({taux:Math.min(100,Math.max(0,Number(e.target.value)))})}
+                    style={{width:"54px",padding:"4px 6px",border:`1px solid ${C.blueBorder}`,borderRadius:"5px",fontSize:"14px",fontFamily:"'DM Mono',monospace",color:C.blueLight,background:C.black,outline:"none",textAlign:"center",fontWeight:800}}/>
+                  <span style={{fontSize:"11px",color:C.blueLight}}>%</span>
+                </div>
+                <div style={{fontSize:"10px",color:C.blueLight,marginTop:"5px",opacity:0.8}}>= {d.taux||0} demandes sur 100 nécessitent une qualification complémentaire</div>
+              </div>
+              {/* Scénarios */}
+              <Lbl>Scénarios de traitement</Lbl>
+              {scenarios.map((s,i)=>(
+                <div key={i} style={{padding:"10px 12px",background:C.blackSurf,borderRadius:"7px",border:`1px solid ${C.blackBorder}`,marginBottom:"7px"}}>
+                  <input value={s.label} onChange={e=>updScen(i,{label:e.target.value})}
+                    style={{width:"100%",padding:"4px 8px",background:C.black,border:`1px solid ${C.blackBorder}`,borderRadius:"5px",fontSize:"12px",color:C.white,outline:"none",fontFamily:"'Barlow',sans-serif",marginBottom:"7px"}}/>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+                    <div><div style={{fontSize:"9px",color:C.whiteLight,marginBottom:"3px",textTransform:"uppercase",letterSpacing:"0.06em"}}>Durée (min)</div>
+                      <NInput value={s.temps} onChange={v=>updScen(i,{temps:v})} min={0} max={480} step={5} style={{width:"100%",color:C.blueLight}}/>
+                    </div>
+                    <div><div style={{fontSize:"9px",color:C.whiteLight,marginBottom:"3px",textTransform:"uppercase",letterSpacing:"0.06em"}}>Fréquence (%)</div>
+                      <NInput value={s.pct} onChange={v=>updScen(i,{pct:v})} min={0} max={100} style={{width:"100%",color:pctOk?C.blueLight:C.amber}}/>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div style={{padding:"7px 12px",background:pctOk?C.blueDim:C.amberDim,borderRadius:"6px",border:`1px solid ${pctOk?C.blueBorder:C.amber+"40"}`,display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:"11px",color:pctOk?C.blueLight:C.amber}}>{pctOk?"✓ Distribution valide":`⚠ Total ${totalPct}%`}</span>
+                <span style={{fontSize:"12px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:pctOk?C.blueLight:C.amber}}>⌀ {fmtH(tpMoyen/60)}</span>
+              </div>
+            </div>
+            <div>
+              <Lbl>Profils assignés</Lbl>
+              <select onChange={e=>{const pid=e.target.value;if(pid&&!(d.profils||[]).find(p=>p.id===pid)){upd({profils:[...(d.profils||[]),{id:pid,pctTemps:100}]});}e.target.value="";}}
+                style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",background:C.blackSurf,color:C.white,marginBottom:"8px"}}>
+                <option value="">+ Assigner…</option>
+                {allProfils.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+              {(d.profils||[]).map(x=>{const p=allProfils.find(q=>q.id===x.id);return p?(
+                <div key={x.id} style={{padding:"8px 10px",background:C.blackSurf,borderRadius:"7px",border:`1px solid ${C.blackBorder}`,marginBottom:"6px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px"}}>
+                    <span style={{fontSize:"12px",fontWeight:600,color:C.white}}>{p.label}</span>
+                    <button onClick={()=>upd({profils:(d.profils||[]).filter(q=>q.id!==x.id)})} style={{background:"none",border:"none",cursor:"pointer",color:C.whiteLight,fontSize:"14px"}}>×</button>
+                  </div>
+                  <PctCtrl value={x.pctTemps} onChange={v=>upd({profils:(d.profils||[]).map(q=>q.id===x.id?{...q,pctTemps:v}:q)})} color={C.blueLight} label="% temps alloué"/>
+                </div>
+              ):null;})}
+              <div style={{marginTop:"10px"}}>
+                <Lbl>Outils utilisés</Lbl>
+                <select onChange={e=>{const oid=e.target.value;if(oid&&!(d.outils||[]).includes(oid)){upd({outils:[...(d.outils||[]),oid]});}e.target.value="";}}
+                  style={{width:"100%",padding:"7px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",background:C.blackSurf,color:C.white,marginBottom:"6px"}}>
+                  <option value="">+ Ajouter un outil…</option>
+                  {allOutils.map(o=><option key={o.id} value={o.id}>{o.nom}</option>)}
+                </select>
+                <div style={{display:"flex",flexWrap:"wrap",gap:"5px"}}>
+                  {(d.outils||[]).map(oid=>{const o=allOutils.find(x=>x.id===oid);return o?(
+                    <span key={oid} style={{display:"inline-flex",alignItems:"center",gap:"4px",padding:"3px 9px",borderRadius:"4px",fontSize:"11px",color:C.blueLight,background:C.blueDim,border:`1px solid ${C.blueBorder}`,fontFamily:"'Barlow Condensed',sans-serif",fontWeight:700}}>
+                      {o.nom}<button onClick={()=>upd({outils:(d.outils||[]).filter(x=>x!==oid)})} style={{background:"none",border:"none",cursor:"pointer",color:C.blueLight,fontSize:"13px",lineHeight:1,padding:0,marginLeft:"2px"}}>×</button>
+                    </span>
+                  ):null;})}
+                </div>
+              </div>
+              <div style={{marginTop:"10px"}}>
+                <Lbl>Observations</Lbl>
+                <textarea value={d.note||""} onChange={e=>upd({note:e.target.value})} placeholder="Notes sur cette qualification…" rows={3}
+                  style={{width:"100%",padding:"8px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",color:C.white,background:C.blackSurf,lineHeight:1.6,resize:"vertical",fontFamily:"'Barlow',sans-serif"}}/>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {open && !d.active && (
+        <div style={{padding:"18px",background:C.black,borderTop:`1px solid ${C.blackBorder}`,textAlign:"center",color:C.whiteLight,fontSize:"13px"}}>
+          Activez la qualification complémentaire pour configurer les scénarios et les ressources associées.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── SWIMLANE ── */
+function Swimlane({etapesData,allProfils,allOutils}) {
+  const ruptures = useMemo(()=>{
+    const map={};
+    ETAPES_DEF.forEach(e=>{
+      const d=etapesData[e.id]||{};
+      (d.outils||[]).forEach(oid=>{const o=allOutils.find(x=>x.id===oid);if(o){if(!map[o.nom])map[o.nom]=[];map[o.nom].push(e.id);}});
+    });
+    return Object.entries(map).filter(([,et])=>et.length>1).map(([nom,etapes])=>({nom,etapes}));
+  },[etapesData,allOutils]);
+
+  const cellW=138, labelW=150;
+
+  if(!allProfils.length) return (
+    <div style={{padding:"28px",textAlign:"center",color:C.whiteLight,fontSize:"13px",fontStyle:"italic"}}>Ajoutez des profils et assignez-les aux étapes pour générer le swimlane.</div>
+  );
+
+  return (
+    <div>
+      <div style={{overflowX:"auto",borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+        <div style={{minWidth:`${labelW+ETAPES_DEF.length*cellW}px`}}>
+          {/* Header */}
+          <div style={{display:"flex",background:C.blackSurf,borderBottom:`1px solid ${C.blackBorder}`}}>
+            <div style={{width:`${labelW}px`,flexShrink:0,padding:"10px 14px",borderRight:`1px solid ${C.blackBorder}`}}>
+              <span style={{fontSize:"9px",fontWeight:700,color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.09em"}}>Profil / Service</span>
+            </div>
+            {ETAPES_DEF.map(e=>(
+              <div key={e.id} style={{width:`${cellW}px`,flexShrink:0,padding:"10px 8px",borderRight:`1px solid ${C.blackBorder}`,textAlign:"center"}}>
+                <div style={{fontSize:"15px",marginBottom:"3px"}}>{e.icon}</div>
+                <div style={{fontSize:"9px",fontWeight:800,color:e.color,textTransform:"uppercase",letterSpacing:"0.04em",lineHeight:1.3,fontFamily:"'Barlow Condensed',sans-serif"}}>{e.shortLabel}</div>
+              </div>
+            ))}
+          </div>
+          {/* Rows */}
+          {allProfils.map((profil,ri)=>(
+            <div key={profil.id} style={{display:"flex",borderBottom:`1px solid ${C.blackBorder}`,background:ri%2===0?C.black:C.blackMid}}>
+              <div style={{width:`${labelW}px`,flexShrink:0,padding:"10px 14px",borderRight:`1px solid ${C.blackBorder}`,display:"flex",flexDirection:"column",justifyContent:"center",gap:"3px"}}>
+                <div style={{fontSize:"12px",fontWeight:700,color:C.white,fontFamily:"'Barlow',sans-serif"}}>{profil.label}</div>
+                <div style={{fontSize:"10px",color:C.whiteLight}}>{profil.service||"—"}</div>
+                <Tag color={profil.niveau===0?C.cyan:profil.niveau===1?C.blueLight:C.amber} size={9}>{NIVEAUX[profil.niveau]}</Tag>
+              </div>
+              {ETAPES_DEF.map(etape=>{
+                const d=etapesData[etape.id]||{};
+                const assigned=(d.profils||[]).find(pa=>pa.id===profil.id);
+                const outils=(d.outils||[]).map(oid=>allOutils.find(o=>o.id===oid)).filter(Boolean);
+                return (
+                  <div key={etape.id} style={{width:`${cellW}px`,flexShrink:0,padding:"8px",borderRight:`1px solid ${C.blackBorder}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"3px"}}>
+                    {assigned?(
+                      <>
+                        <div style={{width:"26px",height:"26px",borderRadius:"50%",background:`${etape.color}25`,border:`2px solid ${etape.color}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px"}}>{etape.icon}</div>
+                        <div style={{fontSize:"10px",fontWeight:700,color:etape.color,fontFamily:"'DM Mono',monospace"}}>{assigned.pctTemps}%</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:"2px",justifyContent:"center"}}>
+                          {outils.slice(0,2).map(o=><span key={o.id} style={{fontSize:"8px",padding:"1px 4px",background:C.blueDim,color:C.blueLight,borderRadius:"2px",fontFamily:"'DM Mono',monospace",fontWeight:700}}>{o.nom}</span>)}
+                          {outils.length>2&&<span style={{fontSize:"8px",color:C.whiteLight}}>+{outils.length-2}</span>}
+                        </div>
+                      </>
+                    ):(
+                      <div style={{width:"8px",height:"8px",borderRadius:"50%",background:C.blackBorder}}/>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Ruptures */}
+      {ruptures.length>0&&(
+        <div style={{marginTop:"14px"}}>
+          <Lbl style={{color:C.amber}}>Connexions & ruptures d'outils détectées</Lbl>
+          <div style={{display:"flex",flexDirection:"column",gap:"7px",marginTop:"8px"}}>
+            {ruptures.map(r=>{
+              const frag=r.etapes.length>2;
+              return (
+                <div key={r.nom} style={{padding:"10px 14px",background:frag?C.amberDim:C.blueDim,border:`1px solid ${frag?C.amber+"50":C.blueBorder}`,borderRadius:"7px",display:"flex",alignItems:"center",gap:"12px"}}>
+                  <span style={{fontSize:"16px"}}>{frag?"⚠️":"🔗"}</span>
+                  <div style={{flex:1}}>
+                    <span style={{fontSize:"12px",fontWeight:800,color:frag?C.amber:C.blueLight,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.03em"}}>{r.nom}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:"4px",marginTop:"4px",flexWrap:"wrap"}}>
+                      {r.etapes.map((eid,i)=>{const e=ETAPES_DEF.find(x=>x.id===eid);return(<span key={eid} style={{display:"flex",alignItems:"center",gap:"3px"}}><Tag color={e?.color||C.white} size={9}>{e?.shortLabel||eid}</Tag>{i<r.etapes.length-1&&<span style={{color:C.whiteLight,fontSize:"10px"}}>→</span>}</span>);})}
+                    </div>
+                  </div>
+                  {frag&&<div style={{fontSize:"11px",color:C.amber,maxWidth:"160px",lineHeight:1.4,textAlign:"right"}}>Usage fragmenté — signal de centralisation</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── EXPORT PDF (jsPDF programmatique) ── */
+let _jspdfLoaded = false;
+function loadJsPDF() {
+  return new Promise((resolve, reject) => {
+    if (window.jspdf) { resolve(window.jspdf.jsPDF); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    s.onload = () => resolve(window.jspdf.jsPDF);
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function exportPDF({ clientNom, clientSecteur, clientContact, calc, volD, volDv, volC, txDD, txDC, etapesData, notes }) {
+  const JsPDF = await loadJsPDF();
+  const doc = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = 210, M = 14;
+  const CW = W - M * 2;
+  let y = M;
+
+  const CYAN = [0, 200, 215];
+  const BLUE = [47, 95, 152];
+  const WHITE = [232, 238, 245];
+  const DARK = [26, 32, 48];
+  const MID = [122, 138, 154];
+  const AMBER = [240, 160, 32];
+  const GREEN = [0, 200, 150];
+  const RED = [239, 68, 68];
+
+  // fond page
+  doc.setFillColor(9, 13, 18);
+  doc.rect(0, 0, W, 297, "F");
+
+  // ── barre header
+  doc.setFillColor(...DARK);
+  doc.rect(0, 0, W, 22, "F");
+  doc.setDrawColor(...CYAN);
+  doc.setLineWidth(0.5);
+  doc.line(0, 22, W, 22);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(...MID);
+  doc.text("SMLB · NEXT360 — QUALIFICATION PROSPECT", M, 8);
+
+  doc.setFontSize(13);
+  doc.setTextColor(...WHITE);
+  doc.text(clientNom || "Prospect", M, 16);
+
+  doc.setFontSize(7);
+  doc.setTextColor(...MID);
+  doc.setFont("helvetica", "normal");
+  const dateStr = new Date().toLocaleDateString("fr-FR");
+  doc.text(dateStr, W - M, 16, { align: "right" });
+  if (clientSecteur) doc.text(`${clientSecteur}${clientContact ? " · " + clientContact : ""}`, M, 20);
+
+  y = 28;
+
+  // ── ligne cyan séparatrice
+  doc.setDrawColor(...CYAN);
+  doc.setLineWidth(0.4);
+  doc.line(M, y, W - M, y);
+  y += 4;
+
+  // ── KPIs 5 colonnes
+  const kpis = [
+    ["ETP mobilisés", String(calc.etpTotal), CYAN],
+    ["Coût RH / mois", fmtEuro(calc.coutRH), [74, 130, 196]],
+    ["Budget outils / mois", fmtEuro(calc.coutOutils), BLUE],
+    ["Coût total / mois", fmtEuro(calc.coutTotal), CYAN],
+    ["Coût / dossier", fmtEuro(calc.coutPD), AMBER],
+  ];
+  const kW = CW / kpis.length;
+  kpis.forEach(([label, value, color], i) => {
+    const x = M + i * kW;
+    doc.setFillColor(...DARK);
+    doc.roundedRect(x, y, kW - 2, 16, 2, 2, "F");
+    doc.setDrawColor(...color);
+    doc.setLineWidth(0.4);
+    doc.line(x, y, x + kW - 2, y);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(6);
+    doc.setTextColor(...MID);
+    doc.text(label.toUpperCase(), x + (kW - 2) / 2, y + 5, { align: "center" });
+    doc.setFontSize(9);
+    doc.setTextColor(...color);
+    doc.text(value, x + (kW - 2) / 2, y + 12, { align: "center" });
+  });
+  y += 20;
+
+  // ── Funnel + Charge (2 colonnes)
+  const colW = (CW - 4) / 2;
+
+  // Funnel
+  doc.setFillColor(...DARK);
+  doc.roundedRect(M, y, colW, 38, 2, 2, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6);
+  doc.setTextColor(...MID);
+  doc.text("FUNNEL DE TRANSFORMATION", M + 4, y + 6);
+  const funnelRows = [
+    ["Demandes", fmtN(volD), "100%", CYAN],
+    ["Devis émis", fmtN(volDv), `${txDD}%`, [74, 130, 196]],
+    ["Commandes", fmtN(volC), `${txDC}%`, GREEN],
+  ];
+  funnelRows.forEach(([lbl, val, pct, c], i) => {
+    const fy = y + 12 + i * 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...MID);
+    doc.text(lbl, M + 4, fy);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...c);
+    doc.text(val, M + colW - 16, fy, { align: "right" });
+    doc.setFontSize(6);
+    doc.setTextColor(...c);
+    doc.text(pct, M + colW - 4, fy, { align: "right" });
+    // barre
+    doc.setFillColor(36, 45, 58);
+    doc.roundedRect(M + 4, fy + 1, colW - 10, 2, 1, 1, "F");
+    const barW = Math.max(1, (parseInt(pct) / 100) * (colW - 10));
+    doc.setFillColor(...c);
+    doc.roundedRect(M + 4, fy + 1, barW, 2, 1, 1, "F");
+  });
+
+  // Charge
+  const cx = M + colW + 4;
+  doc.setFillColor(...DARK);
+  doc.roundedRect(cx, y, colW, 38, 2, 2, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6);
+  doc.setTextColor(...MID);
+  doc.text("CHARGE & CAPACITÉ", cx + 4, y + 6);
+  [["Charge mensuelle", fmtH(calc.chargeH), CYAN], ["Capacité effective", fmtH(calc.capH), MID]].forEach(([lbl, val, c], i) => {
+    const ry = y + 13 + i * 8;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...MID); doc.text(lbl, cx + 4, ry);
+    doc.setFont("helvetica", "bold"); doc.setTextColor(...c); doc.text(val, cx + colW - 4, ry, { align: "right" });
+  });
+  // jauge taux de charge
+  const tauxColor = calc.tauxC > 90 ? RED : calc.tauxC > 70 ? AMBER : GREEN;
+  doc.setFillColor(36, 45, 58);
+  doc.roundedRect(cx + 4, y + 30, colW - 8, 3, 1, 1, "F");
+  doc.setFillColor(...tauxColor);
+  doc.roundedRect(cx + 4, y + 30, Math.min(colW - 8, (calc.tauxC / 100) * (colW - 8)), 3, 1, 1, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(...tauxColor);
+  doc.text(`Taux de charge : ${calc.tauxC.toFixed(0)}%`, cx + colW - 4, y + 37, { align: "right" });
+
+  y += 42;
+
+  // ── Points bloquants
+  const bloquants = ETAPES_DEF.filter(e => etapesData[e.id]?.note?.includes("!"));
+  if (bloquants.length > 0) {
+    doc.setFillColor(60, 40, 10);
+    const bh = 10 + bloquants.length * 7;
+    doc.roundedRect(M, y, CW, bh, 2, 2, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(...AMBER);
+    doc.text("POINTS BLOQUANTS IDENTIFIÉS", M + 4, y + 5);
+    bloquants.forEach((e, i) => {
+      doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(...WHITE);
+      doc.text(`${e.shortLabel} :`, M + 4, y + 11 + i * 7);
+      doc.setFont("helvetica", "normal"); doc.setTextColor(...MID);
+      const note = etapesData[e.id].note.substring(0, 90);
+      doc.text(note, M + 28, y + 11 + i * 7);
+    });
+    y += bh + 4;
+  }
+
+  // ── Profils mobilisés
+  doc.setFillColor(...DARK);
+  const etapesActives = ETAPES_DEF.filter(e => {
+    const d = etapesData[e.id] || {};
+    return (d.profils || []).length > 0 || (d.tempsBase || 0) > 0;
+  });
+  if (etapesActives.length > 0) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(...MID);
+    doc.text("WORKFLOW — TEMPS PAR ÉTAPE", M, y + 4);
+    y += 7;
+    const eW = CW / Math.min(etapesActives.length, 6);
+    etapesActives.slice(0, 6).forEach((e, i) => {
+      const d = etapesData[e.id] || {};
+      const t = (d.tempsBase || 0) + (d.tempsSup || 0);
+      const ex = M + i * eW;
+      doc.setFillColor(...DARK);
+      doc.roundedRect(ex, y, eW - 2, 14, 1, 1, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(6);
+      doc.setTextColor(0, 200, 215);
+      doc.text(e.shortLabel, ex + (eW - 2) / 2, y + 5, { align: "center" });
+      doc.setFontSize(8); doc.setTextColor(...WHITE);
+      doc.text(t > 0 ? fmtH(t / 60) : "—", ex + (eW - 2) / 2, y + 11, { align: "center" });
+    });
+    y += 18;
+  }
+
+  // ── Notes
+  if (notes.general || notes.postrdv) {
+    [["NOTES DE RÉUNION", notes.general], ["ACTIONS POST-RDV", notes.postrdv]].forEach(([title, content]) => {
+      if (!content) return;
+      const lines = doc.splitTextToSize(content, colW - 8);
+      const nh = 10 + lines.length * 4.5;
+      doc.setFillColor(...DARK);
+      doc.roundedRect(M, y, CW, nh, 2, 2, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(6); doc.setTextColor(...MID);
+      doc.text(title, M + 4, y + 5);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...MID);
+      doc.text(lines, M + 4, y + 10);
+      y += nh + 4;
+    });
+  }
+
+  // ── Footer NEXT360
+  doc.setFillColor(0, 200, 215, 20);
+  doc.setDrawColor(...CYAN);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(M, y, CW, 12, 2, 2, "D");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(7); doc.setTextColor(...CYAN);
+  doc.text("PROJECTION NEXT360 · À compléter avec les métriques SMLB", W / 2, y + 5, { align: "center" });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(6); doc.setTextColor(...MID);
+  doc.text("Comparaison situation actuelle vs NEXT360 — calcul des économies envisageables et ROI d'adoption", W / 2, y + 10, { align: "center" });
+
+  // ── pied de page
+  doc.setFontSize(6); doc.setTextColor(...MID);
+  doc.text(`SMLB · NEXT360 — ${clientNom || "Prospect"} — ${dateStr}`, W / 2, 290, { align: "center" });
+
+  doc.save(`NEXT360_${(clientNom || "Prospect").replace(/\s+/g, "_")}_${dateStr.replace(/\//g, "-")}.pdf`);
+}
+
+/* ── DOSSIER SERIALIZATION ── */
+const SCHEMA_VERSION = "1.0";
+
+function exportJSON(state) {
+  const payload = { _version: SCHEMA_VERSION, _exportedAt: new Date().toISOString(), ...state };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const nom = (state.clientNom || "Prospect").replace(/\s+/g, "_");
+  const date = new Date().toLocaleDateString("fr-FR").replace(/\//g, "-");
+  a.href = url;
+  a.download = `NEXT360_${nom}_${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function readJSONFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => { try { resolve(JSON.parse(e.target.result)); } catch { reject(new Error("Fichier JSON invalide")); } };
+    reader.onerror = () => reject(new Error("Erreur de lecture"));
+    reader.readAsText(file);
+  });
+}
+
+/* ── MODALE CHARGEMENT ── */
+function ModalChargement({ dossier, onConfirm, onCancel }) {
+  const nom = dossier.clientNom || "Sans nom";
+  const date = dossier._exportedAt ? new Date(dossier._exportedAt).toLocaleString("fr-FR") : "—";
+  const nbP = (dossier.profils || []).length;
+  const nbO = (dossier.outils || []).length;
+  return (
+    <Modal title="Charger un dossier" onClose={onCancel} width="440px">
+      <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
+        <div style={{padding:"14px 16px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+          <div style={{fontSize:"17px",fontWeight:800,color:C.white,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.03em",marginBottom:"8px"}}>{nom}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"}}>
+            {[["Exporté le",date],["Profils",`${nbP} profil${nbP>1?"s":""}`],["Outils",`${nbO} outil${nbO>1?"s":""}`],["Version",dossier._version||"—"]].map(([l,v])=>(
+              <div key={l}><div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.07em"}}>{l}</div><div style={{fontSize:"12px",fontWeight:600,color:C.whiteMid,marginTop:"1px"}}>{v}</div></div>
+            ))}
+          </div>
+        </div>
+        <div style={{padding:"10px 14px",background:C.amberDim,border:`1px solid ${C.amber}40`,borderRadius:"7px",fontSize:"12px",color:C.amber}}>
+          ⚠ Le chargement remplacera toutes les données actuellement saisies.
+        </div>
+        <div style={{display:"flex",gap:"8px",justifyContent:"flex-end"}}>
+          <button onClick={onCancel} style={{padding:"8px 18px",background:"transparent",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",color:C.whiteMid,fontSize:"12px",cursor:"pointer"}}>Annuler</button>
+          <button onClick={onConfirm} style={{padding:"8px 18px",background:C.cyan,border:"none",borderRadius:"6px",color:C.black,fontSize:"12px",fontWeight:800,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>Charger ce dossier</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ── MAIN ── */
+function ConsoleV4() {
+  const [section,setSection] = useState("funnel");
+  const [showMP,setShowMP] = useState(false);
+  const [showMO,setShowMO] = useState(false);
+
+  const [clientNom,setClientNom] = useState("");
+  const [clientSecteur,setClientSecteur] = useState("");
+  const [clientRdv,setClientRdv] = useState("");
+  const [clientContact,setClientContact] = useState("");
+
+  const [volD,setVolD] = useState(0);
+  const [volDv,setVolDv] = useState(0);
+  const [volC,setVolC] = useState(0);
+  const [txDD,setTxDD] = useState(75);
+  const [txDC,setTxDC] = useState(85);
+  const [jO,setJO] = useState(21);
+  const [hJ,setHJ] = useState(7);
+
+  const [profils,setProfils] = useState([]);
+  const [outils,setOutils] = useState([]);
+  const [etapesData,setEtapesData] = useState({});
+  const [qualifData,setQualifData] = useState({active:false,taux:30,scenarios:[{label:"Standard",temps:60,pct:70},{label:"Complexe",temps:90,pct:30}],profils:[],outils:[],note:""});
+  const [notes,setNotes] = useState({general:"",postrdv:""});
+
+  // Import/Export
+  const [pendingDossier,setPendingDossier] = useState(null);
+  const [saveFlash,setSaveFlash] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const getSnapshot = useCallback(() => ({
+    clientNom, clientSecteur, clientRdv, clientContact,
+    volD, volDv, volC, txDD, txDC, jO, hJ,
+    profils, outils, etapesData, notes,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [clientNom,clientSecteur,clientRdv,clientContact,volD,volDv,volC,txDD,txDC,jO,hJ,profils,outils,etapesData,notes]);
+
+  const handleSave = () => {
+    exportJSON({ clientNom, clientSecteur, clientRdv, clientContact, volD, volDv, volC, txDD, txDC, jO, hJ, profils, outils, etapesData, qualifData, notes });
+    setSaveFlash(true);
+    setTimeout(() => setSaveFlash(false), 2000);
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const data = await readJSONFile(file);
+      setPendingDossier(data);
+    } catch { alert("Fichier invalide — vérifiez qu'il s'agit d'un export NEXT360."); }
+    e.target.value = "";
+  };
+
+  const applyDossier = (d) => {
+    setClientNom(d.clientNom||""); setClientSecteur(d.clientSecteur||"");
+    setClientRdv(d.clientRdv||""); setClientContact(d.clientContact||"");
+    setVolD(d.volD||0); setVolDv(d.volDv||0); setVolC(d.volC||0);
+    setTxDD(d.txDD??75); setTxDC(d.txDC??85);
+    setJO(d.jO||21); setHJ(d.hJ||7);
+    setProfils(d.profils||[]); setOutils(d.outils||[]);
+    setEtapesData(d.etapesData||{}); setNotes(d.notes||{general:"",postrdv:""});
+    setQualifData(d.qualifData||{active:false,taux:30,scenarios:[{label:"Standard",temps:60,pct:70},{label:"Complexe",temps:90,pct:30}],profils:[],outils:[],note:""});
+    setPendingDossier(null);
+    setSection("funnel");
+  };
+
+  const addP = useCallback(p=>setProfils(prev=>[...prev,p]),[]);
+  const updP = useCallback(u=>setProfils(p=>p.map(x=>x.id===u.id?u:x)),[]);
+  const delP = useCallback(id=>setProfils(p=>p.filter(x=>x.id!==id)),[]);
+  const addO = useCallback(o=>setOutils(prev=>[...prev,o]),[]);
+  const delO = id=>setOutils(o=>o.filter(x=>x.id!==id));
+  const updE = (id,data)=>setEtapesData(prev=>({...prev,[id]:data}));
+
+  const calc = useMemo(()=>{
+    const etpTotal=profils.reduce((a,p)=>a+p.effectif,0);
+    const coutRH=profils.reduce((a,p)=>a+(p.cout/12)*p.effectif,0);
+    const coutOutils=outils.reduce((acc,o)=>{
+      const cm=o.periodicite==="an"?o.cout*o.utilisateurs/12:o.periodicite==="utilisateur"?o.cout*o.utilisateurs:o.cout;
+      return acc+cm;
+    },0);
+    const coutTotal=coutRH+coutOutils;
+    const coutPD=volC>0?coutTotal/volC:0;
+    // Temps moyen pondéré par étape (scénarios v5)
+    const tempsT=ETAPES_DEF.reduce((a,e)=>{
+      const d=etapesData[e.id]||{};
+      const scenarios=d.scenarios||[];
+      if(scenarios.length>0){
+        return a+tempsPondere(scenarios);
+      }
+      return a+(d.tempsBase||0)+(d.tempsSup||0);
+    },0);
+    // Ajout qualification optionnelle si active
+    const qualifT = qualifData.active ? tempsPondere(qualifData.scenarios||[])*(qualifData.taux||0)/100 : 0;
+    const capH=profils.reduce((acc,p)=>{const prod=Math.max(0,p.disponibilite-p.fragmentation)/100;return acc+hJ*(p.pctMarche/100)*prod*jO*p.effectif;},0);
+    const chargeH=volC*((tempsT+qualifT)/60);
+    const tauxC=capH>0?(chargeH/capH)*100:0;
+    return {etpTotal,coutRH,coutOutils,coutTotal,coutPD,capH,chargeH,tauxC,tempsT,qualifT};
+  },[profils,outils,etapesData,qualifData,volC,jO,hJ]);
+
+  const maturity = useMemo(()=>computeMaturity({clientNom,volD,volDv,volC,profils,outils,etapesData,qualifData}),
+    [clientNom,volD,volDv,volC,profils,outils,etapesData,qualifData]);
+
+  const NAV=[{id:"funnel",icon:"📊",label:"Volumétrie & Funnel"},{id:"workflow",icon:"🗺️",label:"Workflow"},{id:"profils",icon:"👥",label:"Profils mobilisés"},{id:"outils",icon:"🛠️",label:"Outils & Budget"},{id:"arborescence",icon:"🔗",label:"Arborescence"},{id:"synthese",icon:"📋",label:"Synthèse & Export"}];
+  const navSt=id=>({display:"flex",alignItems:"center",gap:"9px",padding:"9px 12px",borderRadius:"6px",border:"none",cursor:"pointer",width:"100%",textAlign:"left",background:section===id?C.cyanDim:"transparent",color:section===id?C.cyan:C.whiteMid,fontWeight:section===id?700:400,fontSize:"12px",fontFamily:"'Barlow',sans-serif",transition:"all 0.15s",borderLeft:section===id?`2px solid ${C.cyan}`:"2px solid transparent"});
+
+
+
+  return (
+    <div style={{minHeight:"100vh",background:C.black,fontFamily:"'Barlow',sans-serif",color:C.white}}>
+      <style>{`
+        ${FONTS}
+        *{box-sizing:border-box;margin:0;padding:0;}
+        input,select,textarea,button{font-family:'Barlow',sans-serif;}
+        input[type=range]{-webkit-appearance:none;background:transparent;height:4px;cursor:pointer;}
+        input[type=range]::-webkit-slider-runnable-track{height:4px;background:${C.blackBorder};border-radius:2px;}
+        input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;margin-top:-5px;cursor:pointer;background:${C.cyan};}
+        ::-webkit-scrollbar{width:4px;} ::-webkit-scrollbar-thumb{background:${C.blackBorder};border-radius:2px;}
+        input:focus,select:focus,textarea:focus{outline:1px solid ${C.cyanBorder};}
+        .tt-wrap:hover .tt-box{display:block!important;}
+      `}</style>
+
+      {showMP&&<ModalProfil onAdd={addP} onClose={()=>setShowMP(false)}/>}
+      {showMO&&<ModalOutil onAdd={addO} onClose={()=>setShowMO(false)}/>}
+      {pendingDossier&&<ModalChargement dossier={pendingDossier} onConfirm={()=>applyDossier(pendingDossier)} onCancel={()=>setPendingDossier(null)}/>}
+
+      {/* Input fichier caché */}
+      <input ref={fileInputRef} type="file" accept=".json" onChange={handleFileChange} style={{display:"none"}}/>
+
+      {/* HEADER */}
+      <div style={{background:C.blackMid,borderBottom:`1px solid ${C.blackBorder}`,padding:"11px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 2px 16px rgba(0,0,0,0.5)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"14px"}}>
+          <div style={{width:"36px",height:"36px",background:`linear-gradient(135deg,${C.cyan},${C.blue})`,borderRadius:"8px",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <span style={{color:C.black,fontSize:"13px",fontWeight:900,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.06em"}}>SMLB</span>
+          </div>
+          <div>
+            <div style={{fontSize:"9px",color:C.whiteLight,letterSpacing:"0.14em",textTransform:"uppercase",fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif"}}>NEXT360 — Console Qualification Prospect</div>
+            <input value={clientNom} onChange={e=>setClientNom(e.target.value)} placeholder="Nom du prospect…"
+              style={{fontSize:"16px",fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.03em",color:clientNom?C.white:C.whiteLight,background:"transparent",border:"none",outline:"none",width:"280px"}}/>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:"18px"}}>
+          {/* Boutons Save / Load */}
+          <div style={{display:"flex",gap:"6px"}}>
+            <button onClick={()=>fileInputRef.current?.click()}
+              style={{display:"flex",alignItems:"center",gap:"6px",padding:"7px 14px",background:C.blackSurf,border:`1px solid ${C.blackBorder}`,borderRadius:"6px",color:C.whiteMid,fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em",transition:"all 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.cyan;e.currentTarget.style.color=C.cyan;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.blackBorder;e.currentTarget.style.color=C.whiteMid;}}>
+              📂 Charger
+            </button>
+            <button onClick={handleSave}
+              style={{display:"flex",alignItems:"center",gap:"6px",padding:"7px 14px",background:saveFlash?C.green:C.blackSurf,border:`1px solid ${saveFlash?C.green:C.blackBorder}`,borderRadius:"6px",color:saveFlash?"#000":C.whiteMid,fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em",transition:"all 0.2s"}}
+              onMouseEnter={e=>{if(!saveFlash){e.currentTarget.style.borderColor=C.cyan;e.currentTarget.style.color=C.cyan;}}}
+              onMouseLeave={e=>{if(!saveFlash){e.currentTarget.style.borderColor=C.blackBorder;e.currentTarget.style.color=C.whiteMid;}}}>
+              {saveFlash?"✓ Sauvegardé":"💾 Sauvegarder"}
+            </button>
+            <button onClick={()=>{ if(window.confirm("Créer un nouveau dossier vide ? Les données non sauvegardées seront perdues.")){ applyDossier({}); }}}
+              style={{display:"flex",alignItems:"center",gap:"6px",padding:"7px 14px",background:C.blackSurf,border:`1px solid ${C.blackBorder}`,borderRadius:"6px",color:C.whiteMid,fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em",transition:"all 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.red;e.currentTarget.style.color=C.red;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.blackBorder;e.currentTarget.style.color=C.whiteMid;}}>
+              ✕ Nouveau
+            </button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
+            <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.07em"}}>Maturité prospect</div>
+            <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
+              <div style={{display:"flex",gap:"4px"}}>
+                {maturity.scores.map((s,i)=>(
+                  <div key={i} title={MATURITY_LABELS[i]}
+                    style={{width:"14px",height:"14px",borderRadius:"3px",background:SIGNAL_COLORS[s],opacity:s==="red"?0.4:1,cursor:"default",transition:"all 0.3s"}}/>
+                ))}
+              </div>
+              <span style={{fontSize:"11px",fontWeight:800,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.06em",color:maturity.levelColor}}>{maturity.level}</span>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:"16px",padding:"8px 16px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+            {[["ETP",calc.etpTotal,C.cyan],["Coût/mois",fmtEuro(calc.coutTotal),C.blueLight],["Charge",`${calc.tauxC.toFixed(0)}%`,calc.tauxC>90?C.red:calc.tauxC>70?C.amber:C.green]].map(([l,v,c])=>(
+              <div key={l} style={{textAlign:"center"}}>
+                <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.05em"}}>{l}</div>
+                <div style={{fontSize:"14px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",height:"calc(100vh - 61px)"}}>
+        {/* SIDEBAR */}
+        <div style={{width:"192px",flexShrink:0,borderRight:`1px solid ${C.blackBorder}`,padding:"14px 10px",background:C.blackMid,display:"flex",flexDirection:"column",gap:"2px",overflowY:"auto"}}>
+          {NAV.map(n=><button key={n.id} style={navSt(n.id)} onClick={()=>setSection(n.id)}><span style={{fontSize:"14px"}}>{n.icon}</span><span>{n.label}</span></button>)}
+          <div style={{marginTop:"auto",padding:"12px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+            <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"8px"}}>Résumé mensuel</div>
+            {[["RH",fmtEuro(calc.coutRH)],["Outils",fmtEuro(calc.coutOutils)],["Total",fmtEuro(calc.coutTotal)]].map(([l,v],i)=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderTop:i===2?`1px solid ${C.blackBorder}`:"none",marginTop:i===2?"4px":0}}>
+                <span style={{fontSize:"11px",color:i===2?C.white:C.whiteMid,fontWeight:i===2?700:400}}>{l}</span>
+                <span style={{fontSize:"11px",fontWeight:700,fontFamily:"'DM Mono',monospace",color:i===2?C.cyan:C.whiteMid}}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* MAIN */}
+        <div style={{flex:1,overflowY:"auto",padding:"24px 28px",background:C.black}}>
+
+          {/* FUNNEL */}
+          {section==="funnel"&&(
+            <div>
+              <PageHead title="Volumétrie & Funnel" sub="Métriques de flux mensuels et taux de transformation indépendants." />
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"18px",marginBottom:"18px"}}>
+                <Card>
+                  <Lbl>Métriques mensuelles déclarées</Lbl>
+                  <div style={{display:"flex",flexDirection:"column",gap:"8px",marginTop:"10px"}}>
+                    {[["# Demandes reçues / mois",volD,setVolD,C.cyan],["# Devis émis / mois",volDv,setVolDv,C.blueLight],["# Commandes / mois",volC,setVolC,C.green]].map(([lbl,val,setter,c])=>(
+                      <div key={lbl} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                        <span style={{fontSize:"12px",color:C.whiteMid}}>{lbl}</span>
+                        <NInput value={val} onChange={setter} min={0} max={100000} step={10} style={{width:"110px",fontSize:"18px",fontWeight:800,color:c,background:"transparent",border:"none",textAlign:"right"}}/>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginTop:"10px"}}>
+                    {[["Jours ouvrés / mois",jO,setJO,15,25,1],["Heures contractuelles / j",hJ,setHJ,4,10,0.5]].map(([lbl,val,setter,mn,mx,st])=>(
+                      <div key={lbl} style={{padding:"10px 12px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                        <div style={{fontSize:"10px",color:C.whiteLight,marginBottom:"4px"}}>{lbl}</div>
+                        <NInput value={val} onChange={setter} min={mn} max={mx} step={st} style={{width:"100%",fontSize:"16px",fontWeight:700,color:C.white,background:"transparent",border:"none"}}/>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+                <Card>
+                  <Lbl>Taux de transformation (indépendants)</Lbl>
+                  <div style={{display:"flex",flexDirection:"column",gap:"10px",marginTop:"10px",marginBottom:"14px"}}>
+                    {[["Demandes → Devis émis",txDD,setTxDD,C.blueLight],["Devis émis → Commandes",txDC,setTxDC,C.green]].map(([lbl,val,setter,c])=>(
+                      <div key={lbl} style={{padding:"12px 14px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                        <div style={{fontSize:"11px",color:C.whiteMid,marginBottom:"7px"}}>{lbl}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                          <input type="range" min={0} max={100} step={1} value={val} onChange={e=>setter(Number(e.target.value))} style={{flex:1,accentColor:c,cursor:"pointer"}}/>
+                          <input type="number" value={val} min={0} max={100} onChange={e=>setter(Math.min(100,Math.max(0,Number(e.target.value))))}
+                            style={{width:"54px",padding:"4px 6px",border:`1px solid ${C.blackBorder}`,borderRadius:"5px",fontSize:"14px",fontFamily:"'DM Mono',monospace",color:c,background:C.black,outline:"none",textAlign:"center",fontWeight:800}}/>
+                          <span style={{fontSize:"12px",color:C.whiteLight}}>%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {[{label:"Demandes",val:volD,c:C.cyan},{label:"Devis émis",val:volDv,c:C.blueLight,pct:txDD},{label:"Commandes",val:volC,c:C.green,pct:txDC}].map((item,i)=>(
+                    <div key={item.label}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"3px"}}>
+                        <span style={{fontSize:"12px",color:C.whiteMid}}>{item.label}</span>
+                        <span style={{fontSize:"18px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:item.c}}>{fmtN(item.val)}</span>
+                      </div>
+                      <div style={{height:"7px",background:C.blackBorder,borderRadius:"4px",overflow:"hidden",marginBottom:i<2?"12px":"0"}}>
+                        <div style={{height:"100%",width:`${item.pct??100}%`,background:item.c,borderRadius:"4px",transition:"width 0.3s"}}/>
+                      </div>
+                    </div>
+                  ))}
+                </Card>
+              </div>
+              <Card>
+                <Lbl>Informations client</Lbl>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"12px",marginTop:"10px"}}>
+                  {[["Secteur",clientSecteur,setClientSecteur,"Ex : Logistique…"],["Interlocuteur",clientContact,setClientContact,"Nom, fonction"]].map(([lbl,val,setter,ph])=>(
+                    <div key={lbl}><div style={{fontSize:"10px",color:C.whiteLight,marginBottom:"4px"}}>{lbl}</div><TInput value={val} onChange={setter} placeholder={ph}/></div>
+                  ))}
+                  <div><div style={{fontSize:"10px",color:C.whiteLight,marginBottom:"4px"}}>Date RDV</div><input type="date" value={clientRdv} onChange={e=>setClientRdv(e.target.value)} style={{width:"100%",padding:"8px 10px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"13px",color:C.white,background:C.blackSurf,outline:"none"}}/></div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* WORKFLOW */}
+          {section==="workflow"&&(
+            <div>
+              <PageHead title="Workflow étape par étape" sub="Interlocuteurs, outils, temps et contrôles de conformité par étape du processus." />
+              {!profils.length&&<div style={{padding:"12px 16px",background:C.amberDim,border:`1px solid ${C.amber}40`,borderRadius:"8px",marginBottom:"14px",fontSize:"13px",color:C.amber}}>💡 Ajoutez d'abord des profils dans "Profils mobilisés" pour les assigner aux étapes.</div>}
+              <QualifBlock data={qualifData} onChange={setQualifData} allProfils={profils} allOutils={outils}/>
+              {ETAPES_DEF.map(e=><EtapeBlock key={e.id} etape={e} data={etapesData[e.id]} onChange={d=>updE(e.id,d)} allProfils={profils} allOutils={outils}/>)}
+              <div style={{marginTop:"12px",padding:"14px 18px",background:C.blackMid,border:`1px solid ${C.blackBorder}`,borderRadius:"10px",display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"14px"}}>
+                {[
+                  ["Temps parcours",fmtH(calc.tempsT/60),C.cyan],
+                  ["+ Qualif. moy.",qualifData.active?fmtH(calc.qualifT/60):"—",C.blueLight],
+                  ["Charge/mois",fmtH(calc.chargeH),C.blue],
+                  ["Capacité eff.",fmtH(calc.capH),C.whiteMid],
+                  ["Taux charge",`${calc.tauxC.toFixed(0)}%`,calc.tauxC>90?C.red:calc.tauxC>70?C.amber:C.green]
+                ].map(([l,v,c])=>(
+                  <div key={l} style={{textAlign:"center"}}>
+                    <div style={{fontSize:"9px",color:C.whiteLight,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"3px"}}>{l}</div>
+                    <div style={{fontSize:"18px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PROFILS */}
+          {section==="profils"&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"22px"}}>
+                <PageHead title="Profils mobilisés" sub="Équipe engagée sur le processus client." />
+                <button onClick={()=>setShowMP(true)} style={{display:"flex",alignItems:"center",gap:"7px",padding:"9px 18px",background:C.cyan,color:C.black,border:"none",borderRadius:"7px",fontWeight:800,fontSize:"13px",cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.05em",flexShrink:0}}>+ Ajouter un profil</button>
+              </div>
+              {!profils.length&&<div style={{textAlign:"center",padding:"48px",color:C.whiteLight,fontSize:"13px",border:`1px dashed ${C.blackBorder}`,borderRadius:"10px"}}><div style={{fontSize:"36px",marginBottom:"8px"}}>👥</div>Cliquez sur «&nbsp;+ Ajouter un profil&nbsp;» pour commencer</div>}
+              {profils.map(p=>(
+                <Card key={p.id} style={{marginBottom:"10px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"16px"}}>
+                    <div>
+                      <Lbl>Intitulé & service</Lbl>
+                      <TInput value={p.label} onChange={v=>updP({...p,label:v})} style={{marginBottom:"8px"}}/>
+                      <TInput value={p.service||""} onChange={v=>updP({...p,service:v})} placeholder="Service / département"/>
+                    </div>
+                    <div>
+                      <Lbl>Paramètres RH</Lbl>
+                      <div style={{display:"flex",flexDirection:"column",gap:"7px"}}>
+                        {[["Effectif",p.effectif,v=>updP({...p,effectif:v}),1,100,1],["Coût annuel chargé (€)",p.cout,v=>updP({...p,cout:v}),20000,200000,2500]].map(([lbl,val,setter,mn,mx,st])=>(
+                          <div key={lbl} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span style={{fontSize:"12px",color:C.whiteMid}}>{lbl}</span>
+                            <NInput value={val} onChange={setter} min={mn} max={mx} step={st} style={{width:"110px"}}/>
+                          </div>
+                        ))}
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:"12px",color:C.whiteMid}}>Niveau</span>
+                          <select value={p.niveau} onChange={e=>updP({...p,niveau:Number(e.target.value)})} style={{padding:"5px 8px",border:`1px solid ${C.blackBorder}`,borderRadius:"6px",fontSize:"12px",background:C.blackSurf,color:C.white}}>
+                            {NIVEAUX.map((n,i)=><option key={i} value={i}>{n}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <PctCtrl value={p.pctMarche} onChange={v=>updP({...p,pctMarche:v})} color={C.cyan} label="% temps alloué au marché"/>
+                      <PctCtrl value={p.disponibilite} onChange={v=>updP({...p,disponibilite:v})} color={C.green} label="Disponibilité effective"/>
+                      <PctCtrl value={p.fragmentation} onChange={v=>updP({...p,fragmentation:v})} color={C.amber} label="Perte fragmentation"
+                        tooltip="3h planifiées ≠ 3h travaillées d'affilée. Ce coefficient capture interruptions, changements de contexte et temps non-productifs qui réduisent la productivité réelle."/>
+                      <div style={{padding:"6px 10px",background:C.cyanDim,borderRadius:"5px",border:`1px solid ${C.cyanBorder}`,fontSize:"11px",color:C.cyan,marginTop:"4px"}}>
+                        Productivité nette : <strong>{Math.max(0,p.disponibilite-p.fragmentation)}%</strong> → <strong>{fmtH(hJ*(p.pctMarche/100)*(Math.max(0,p.disponibilite-p.fragmentation)/100))}/j</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{marginTop:"10px",display:"flex",justifyContent:"flex-end"}}>
+                    <button onClick={()=>delP(p.id)} style={{padding:"5px 12px",background:C.redDim,border:`1px solid ${C.red}30`,borderRadius:"6px",color:C.red,fontSize:"11px",cursor:"pointer"}}>Supprimer</button>
+                  </div>
+                </Card>
+              ))}
+              {profils.length>0&&(
+                <Card style={{marginTop:"14px",border:`1px solid ${C.cyanBorder}`}}>
+                  <Lbl style={{color:C.cyan}}>Vue charge — Profils × Étapes</Lbl>
+                  <div style={{fontSize:"11px",color:C.whiteMid,marginBottom:"12px"}}>Temps moyen pondéré par dossier selon les scénarios configurés. <span style={{color:C.amber}}>⚠ &gt;85% de capacité = surcharge potentielle.</span></div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}>
+                      <thead>
+                        <tr>
+                          <th style={{textAlign:"left",padding:"6px 10px",color:C.whiteLight,fontWeight:600,borderBottom:`1px solid ${C.blackBorder}`,minWidth:"140px"}}>Profil</th>
+                          {qualifData.active&&<th style={{padding:"6px 8px",color:C.blueLight,fontWeight:700,borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center",fontSize:"10px",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>🔍 Qualif.</th>}
+                          {ETAPES_DEF.map(e=><th key={e.id} style={{padding:"6px 8px",color:e.color,fontWeight:700,borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center",fontSize:"10px",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em",whiteSpace:"nowrap"}}>{e.icon} {e.shortLabel}</th>)}
+                          <th style={{padding:"6px 8px",color:C.cyan,fontWeight:700,borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>Total/dossier</th>
+                          <th style={{padding:"6px 8px",color:C.whiteMid,fontWeight:700,borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>Cap./jour</th>
+                          <th style={{padding:"6px 8px",color:C.whiteMid,fontWeight:700,borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>Charge mois</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {profils.map((p,ri)=>{
+                          const capJour = hJ*(p.pctMarche/100)*(Math.max(0,p.disponibilite-p.fragmentation)/100);
+                          const capMoisMin = capJour*jO*60; // en minutes
+                          let totalDossier = 0;
+                          const cellules = ETAPES_DEF.map(e=>{
+                            const ed=etapesData[e.id]||{};
+                            const pa=(ed.profils||[]).find(x=>x.id===p.id);
+                            if(!pa) return {mins:0,assigned:false,color:e.color};
+                            const tpEtape = tempsPondere(ed.scenarios||[]);
+                            const mins = tpEtape*(pa.pctTemps||0)/100;
+                            totalDossier += mins;
+                            return {mins,assigned:true,color:e.color};
+                          });
+                          // Qualif
+                          const qualifCell = qualifData.active ? (()=>{
+                            const qp=(qualifData.profils||[]).find(x=>x.id===p.id);
+                            if(!qp) return {mins:0,assigned:false};
+                            const tpQ=tempsPondere(qualifData.scenarios||[])*(qualifData.taux||0)/100;
+                            const mins=tpQ*(qp.pctTemps||0)/100;
+                            totalDossier+=mins;
+                            return {mins,assigned:true};
+                          })() : null;
+                          const chargeMoisMins = volC*totalDossier;
+                          const tauxCharge = capMoisMin>0?(chargeMoisMins/capMoisMin)*100:0;
+                          const alertColor = tauxCharge>100?C.red:tauxCharge>85?C.amber:tauxCharge>0?C.green:C.blackBorder;
+                          return (
+                            <tr key={p.id} style={{background:ri%2===0?C.black:C.blackMid}}>
+                              <td style={{padding:"8px 10px",borderBottom:`1px solid ${C.blackBorder}`}}>
+                                <div style={{fontSize:"12px",fontWeight:700,color:C.white}}>{p.label}</div>
+                                <div style={{fontSize:"10px",color:C.whiteLight}}>{p.service||"—"} · ×{p.effectif}</div>
+                              </td>
+                              {qualifData.active&&<td style={{padding:"6px 8px",borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>
+                                {qualifCell?.assigned?(
+                                  <div style={{padding:"3px 6px",background:C.blueDim,borderRadius:"4px",color:C.blueLight,fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:"10px"}}>{fmtH(qualifCell.mins/60)}</div>
+                                ):<div style={{width:"16px",height:"16px",borderRadius:"50%",background:C.blackBorder,margin:"auto"}}/>}
+                              </td>}
+                              {cellules.map((c,ci)=>(
+                                <td key={ci} style={{padding:"6px 8px",borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>
+                                  {c.assigned?(
+                                    <div style={{padding:"3px 6px",background:`${c.color}18`,borderRadius:"4px",color:c.color,fontFamily:"'DM Mono',monospace",fontWeight:700,fontSize:"10px",border:`1px solid ${c.color}30`}}>{fmtH(c.mins/60)}</div>
+                                  ):<div style={{width:"12px",height:"2px",background:C.blackBorder,margin:"auto",borderRadius:"1px"}}/>}
+                                </td>
+                              ))}
+                              <td style={{padding:"6px 8px",borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>
+                                <span style={{fontFamily:"'DM Mono',monospace",fontWeight:800,fontSize:"12px",color:C.cyan}}>{fmtH(totalDossier/60)}</span>
+                              </td>
+                              <td style={{padding:"6px 8px",borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>
+                                <span style={{fontFamily:"'DM Mono',monospace",fontSize:"11px",color:C.whiteMid}}>{fmtH(capJour)}</span>
+                              </td>
+                              <td style={{padding:"6px 8px",borderBottom:`1px solid ${C.blackBorder}`,textAlign:"center"}}>
+                                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:"3px"}}>
+                                  <div style={{fontSize:"11px",fontWeight:700,fontFamily:"'DM Mono',monospace",color:alertColor}}>{tauxCharge.toFixed(0)}%</div>
+                                  <div style={{width:"48px",height:"4px",background:C.blackBorder,borderRadius:"2px",overflow:"hidden"}}>
+                                    <div style={{height:"100%",width:`${Math.min(100,tauxCharge)}%`,background:alertColor,borderRadius:"2px",transition:"width 0.3s"}}/>
+                                  </div>
+                                  {tauxCharge>85&&<div style={{fontSize:"8px",color:alertColor,fontWeight:700}}>{tauxCharge>100?"SURCHARGÉ":"ATTENTION"}</div>}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {section==="outils"&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"22px"}}>
+                <PageHead title="Outils & Budget technologique" sub="Stack logicielle, coûts et affectation multi-étapes." />
+                <button onClick={()=>setShowMO(true)} style={{display:"flex",alignItems:"center",gap:"7px",padding:"9px 18px",background:C.cyan,color:C.black,border:"none",borderRadius:"7px",fontWeight:800,fontSize:"13px",cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.05em",flexShrink:0}}>+ Ajouter un outil</button>
+              </div>
+              {!outils.length&&<div style={{textAlign:"center",padding:"48px",color:C.whiteLight,fontSize:"13px",border:`1px dashed ${C.blackBorder}`,borderRadius:"10px"}}><div style={{fontSize:"36px",marginBottom:"8px"}}>🛠️</div>Cliquez sur «&nbsp;+ Ajouter un outil&nbsp;» pour commencer</div>}
+              {outils.map(o=>{
+                const cm=o.periodicite==="an"?o.cout*o.utilisateurs/12:o.periodicite==="utilisateur"?o.cout*o.utilisateurs:o.cout;
+                return (
+                  <div key={o.id} style={{background:C.blackMid,border:`1px solid ${C.blackBorder}`,borderRadius:"10px",padding:"14px 18px",marginBottom:"8px",display:"flex",alignItems:"center",gap:"14px"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:"14px",fontWeight:700,color:C.white,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.03em"}}>{o.nom||"—"}</div>
+                      <div style={{display:"flex",gap:"4px",marginTop:"5px",flexWrap:"wrap"}}>
+                        {(!o.etapes||!o.etapes.length)?<Tag color={C.whiteLight} bg={C.blackSurf}>Toutes étapes</Tag>:o.etapes.map(eid=>{const e=ETAPES_DEF.find(x=>x.id===eid);return e?<Tag key={eid} color={e.color}>{e.shortLabel}</Tag>:null;})}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:"16px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:C.cyan}}>{fmtEuro(cm)}<span style={{fontSize:"10px",color:C.whiteLight,marginLeft:"2px"}}>/mois</span></div>
+                      <div style={{fontSize:"10px",color:C.whiteLight}}>{o.utilisateurs} util.</div>
+                    </div>
+                    <button onClick={()=>delO(o.id)} style={{background:"none",border:"none",cursor:"pointer",color:C.whiteLight,fontSize:"18px",lineHeight:1}}>×</button>
+                  </div>
+                );
+              })}
+              {outils.length>0&&<div style={{padding:"12px 18px",background:C.blackMid,border:`1px solid ${C.cyanBorder}`,borderRadius:"10px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:"8px"}}>
+                <span style={{fontSize:"13px",color:C.whiteMid}}>Budget technologique total</span>
+                <span style={{fontSize:"20px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:C.cyan}}>{fmtEuro(calc.coutOutils)}/mois</span>
+              </div>}
+            </div>
+          )}
+
+          {/* ARBORESCENCE */}
+          {section==="arborescence"&&(
+            <div>
+              <PageHead title="Arborescence du parcours" sub="Swimlane interlocuteurs × étapes + connexions et ruptures d'outils détectées." />
+              <Card style={{marginBottom:"16px"}}>
+                <Lbl>Diagramme swimlane — Qui intervient à quelle étape</Lbl>
+                <div style={{marginTop:"12px"}}><Swimlane etapesData={etapesData} allProfils={profils} allOutils={outils}/></div>
+              </Card>
+              <Card>
+                <Lbl>Points bloquants & observations consolidées</Lbl>
+                <div style={{marginTop:"10px",display:"flex",flexDirection:"column",gap:"7px"}}>
+                  {ETAPES_DEF.map(e=>{const d=etapesData[e.id];if(!d?.note)return null;const ia=d.note.includes("!");return(
+                    <div key={e.id} style={{padding:"10px 14px",background:ia?C.amberDim:C.blackSurf,borderRadius:"8px",borderLeft:`3px solid ${ia?C.amber:C.blackBorder}`}}>
+                      <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"3px"}}>
+                        <span>{e.icon}</span><span style={{fontSize:"12px",fontWeight:800,color:e.color,fontFamily:"'Barlow Condensed',sans-serif"}}>{e.label}</span>
+                        {ia&&<Tag color={C.amber} bg={C.amberDim}>⚠ Bloquant</Tag>}
+                      </div>
+                      <p style={{fontSize:"12px",color:C.whiteMid,lineHeight:1.5}}>{d.note}</p>
+                    </div>
+                  );})}
+                  {!Object.values(etapesData).some(d=>d?.note)&&<p style={{fontSize:"12px",color:C.whiteLight,fontStyle:"italic"}}>Aucune observation saisie — renseignez les étapes du workflow.</p>}
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* SYNTHESE */}
+          {section==="synthese"&&(
+            <div>
+              <PageHead title="Synthèse & Export PDF" sub="Dashboard consolidé de la situation client. Exportable pour confrontation avec la base SMLB." />
+
+              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"14px"}}>
+                <div style={{display:"flex",gap:"8px"}}>
+                  <button onClick={handleSave}
+                    style={{display:"flex",alignItems:"center",gap:"8px",padding:"10px 18px",background:C.blackSurf,color:C.whiteMid,border:`1px solid ${C.blackBorder}`,borderRadius:"7px",fontWeight:700,fontSize:"13px",cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.04em"}}>
+                    💾 Sauvegarder JSON
+                  </button>
+                  <button onClick={()=>exportPDF({clientNom,clientSecteur,clientContact,calc,volD,volDv,volC,txDD,txDC,etapesData,notes})}
+                    style={{display:"flex",alignItems:"center",gap:"8px",padding:"10px 22px",background:C.cyan,color:C.black,border:"none",borderRadius:"7px",fontWeight:800,fontSize:"13px",cursor:"pointer",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.05em"}}>
+                    ⬇ Exporter en PDF
+                  </button>
+                </div>
+              </div>
+
+              {/* Dashboard visuel (aperçu) */}
+              <div>
+                {/* Print header */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px",paddingBottom:"14px",borderBottom:`2px solid ${C.cyan}`}}>
+                  <div>
+                    <div style={{fontSize:"10px",color:C.whiteMid,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:"3px",fontFamily:"'Barlow Condensed',sans-serif"}}>SMLB · NEXT360 — Qualification Prospect</div>
+                    <div style={{fontSize:"24px",fontWeight:800,color:C.white,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.01em"}}>{clientNom||"Prospect"}</div>
+                    {clientSecteur&&<div style={{fontSize:"13px",color:C.whiteMid,marginTop:"2px"}}>{clientSecteur}{clientContact&&` · ${clientContact}`}</div>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:"6px"}}>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:"10px",color:C.whiteMid}}>Analyse du</div>
+                      <div style={{fontSize:"14px",fontWeight:700,fontFamily:"'DM Mono',monospace",color:C.cyan}}>{new Date().toLocaleDateString("fr-FR")}</div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:"6px",padding:"5px 10px",background:C.blackSurf,borderRadius:"6px",border:`1px solid ${maturity.levelColor}40`}}>
+                      {maturity.scores.map((s,i)=><div key={i} title={MATURITY_LABELS[i]} style={{width:"10px",height:"10px",borderRadius:"2px",background:SIGNAL_COLORS[s],opacity:s==="red"?0.3:1}}/>)}
+                      <span style={{fontSize:"11px",fontWeight:800,color:maturity.levelColor,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.05em",marginLeft:"3px"}}>{maturity.level}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAGNOSTIC NARRATIF */}
+                {(()=>{
+                  const allTags = ETAPES_DEF.flatMap(e=>{
+                    const d=etapesData[e.id]||{};
+                    return (d.signalTags||[]).map(tid=>({tag:tid,etape:e}));
+                  });
+                  const tagCounts = SIGNAL_TAGS.map(t=>({...t,count:allTags.filter(x=>x.tag===t.id).length})).filter(t=>t.count>0);
+                  const dominant = tagCounts.sort((a,b)=>b.count-a.count)[0];
+                  const etapesChargees = ETAPES_DEF.filter(e=>{const d=etapesData[e.id]||{};return tempsPondere(d.scenarios||[])>0;}).sort((a,b)=>tempsPondere((etapesData[b.id]||{}).scenarios||[])-tempsPondere((etapesData[a.id]||{}).scenarios||[])).slice(0,2);
+                  const angleNext360 = dominant?.id==="cout_cache"?"Les coûts cachés identifiés représentent un potentiel d'optimisation direct via la centralisation NEXT360."
+                    :dominant?.id==="fragmentation"?"La fragmentation détectée entre étapes est exactement ce que NEXT360 adresse par la centralisation des flux."
+                    :dominant?.id==="dependance"?"La dépendance aux outils actuels génère un risque et un coût de sortie que NEXT360 peut absorber progressivement."
+                    :dominant?.id==="conformite"?"Les risques conformité identifiés appellent une traçabilité native — c'est le cœur de la valeur NEXT360."
+                    :dominant?.id==="automatisation"?"Les opportunités d'automatisation repérées sont directement adressables par les modules NEXT360."
+                    :"La consolidation du processus sur NEXT360 permettrait de réduire la charge opérationnelle et d'améliorer la traçabilité.";
+                  if(!calc.etpTotal && !volC) return null;
+                  return (
+                    <div style={{padding:"16px 20px",background:`linear-gradient(135deg,${C.blackMid},${C.blackSurf})`,border:`1px solid ${C.cyanBorder}`,borderRadius:"10px",marginBottom:"14px"}}>
+                      <div style={{fontSize:"9px",fontWeight:700,color:C.cyan,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:"10px",fontFamily:"'Barlow Condensed',sans-serif"}}>Diagnostic — Situation client</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+                        {/* Bloc situation */}
+                        {calc.etpTotal>0&&<p style={{fontSize:"13px",color:C.white,lineHeight:1.7,margin:0}}>
+                          {clientNom||"Le prospect"} mobilise <strong style={{color:C.cyan}}>{calc.etpTotal} ETP</strong> pour traiter <strong style={{color:C.cyan}}>{fmtN(volC)} commandes/mois</strong>, soit un coût opérationnel de <strong style={{color:C.cyan}}>{fmtEuro(calc.coutTotal)}/mois</strong> — <strong style={{color:C.amber}}>{fmtEuro(calc.coutPD)}/dossier</strong>.
+                          {calc.tauxC>0&&<> Le taux de charge est de <strong style={{color:calc.tauxC>90?C.red:calc.tauxC>70?C.amber:C.green}}>{calc.tauxC.toFixed(0)}%</strong>{calc.tauxC>90?" — situation de surcharge identifiée.":calc.tauxC>70?" — capacité sous tension.":"."}</>}
+                        </p>}
+                        {/* Bloc friction */}
+                        {etapesChargees.length>0&&<p style={{fontSize:"13px",color:C.whiteMid,lineHeight:1.7,margin:0}}>
+                          Les étapes les plus chronophages sont <strong style={{color:C.white}}>{etapesChargees.map(e=>e.label).join(" et ")}</strong>{tagCounts.length>0&&<>, concentrant les signaux de <strong style={{color:tagCounts[0].color}}>{tagCounts.map(t=>`${t.icon} ${t.label}`).join(", ")}</strong></>}.
+                        </p>}
+                        {/* Angle NEXT360 */}
+                        {dominant&&<div style={{marginTop:"4px",paddingTop:"10px",borderTop:`1px solid ${C.blackBorder}`}}>
+                          <span style={{fontSize:"9px",fontWeight:700,color:C.cyan,textTransform:"uppercase",letterSpacing:"0.08em",fontFamily:"'Barlow Condensed',sans-serif"}}>Angle NEXT360 · </span>
+                          <span style={{fontSize:"13px",color:C.white,lineHeight:1.7}}>{angleNext360}</span>
+                        </div>}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* SCORE MATURITÉ */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px",marginBottom:"14px"}}>
+                  {maturity.scores.map((s,i)=>(
+                    <div key={i} style={{padding:"10px 12px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${SIGNAL_COLORS[s]}40`,display:"flex",alignItems:"center",gap:"8px"}}>
+                      <div style={{width:"10px",height:"10px",borderRadius:"50%",background:SIGNAL_COLORS[s],flexShrink:0}}/>
+                      <div>
+                        <div style={{fontSize:"9px",color:SIGNAL_COLORS[s],fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:"'Barlow Condensed',sans-serif"}}>{s==="green"?"✓ OK":s==="orange"?"⚠ Partiel":"✗ Absent"}</div>
+                        <div style={{fontSize:"10px",color:C.whiteMid,marginTop:"1px"}}>{MATURITY_LABELS[i]}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* KPIs */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"10px",marginBottom:"14px"}}>
+                  {[["ETP mobilisés",calc.etpTotal,C.cyan],["Coût RH / mois",fmtEuro(calc.coutRH),C.blueLight],["Budget outils / mois",fmtEuro(calc.coutOutils),C.blue],["Coût total / mois",fmtEuro(calc.coutTotal),C.cyan],["Coût / dossier",fmtEuro(calc.coutPD),C.amber]].map(([l,v,c])=>(
+                    <div key={l} style={{padding:"14px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`,textAlign:"center",position:"relative",overflow:"hidden"}}>
+                      <div style={{position:"absolute",top:0,left:0,right:0,height:"2px",background:c}}/>
+                      <div style={{fontSize:"9px",color:C.whiteMid,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"5px"}}>{l}</div>
+                      <div style={{fontSize:"19px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Funnel + Charge */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px",marginBottom:"14px"}}>
+                  <div style={{padding:"16px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                    <div style={{fontSize:"10px",fontWeight:700,color:C.whiteMid,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"12px"}}>Funnel de transformation</div>
+                    {[["Demandes",fmtN(volD),"100%",C.cyan],["Devis émis",fmtN(volDv),`${txDD}%`,C.blueLight],["Commandes",fmtN(volC),`${txDC}%`,C.green]].map(([l,v,p,c])=>(
+                      <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                        <span style={{fontSize:"12px",color:C.whiteMid}}>{l}</span>
+                        <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                          <span style={{fontSize:"15px",fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</span>
+                          <Tag color={c} size={9}>{p}</Tag>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{padding:"16px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                    <div style={{fontSize:"10px",fontWeight:700,color:C.whiteMid,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"12px"}}>Charge & capacité</div>
+                    {[["Charge mensuelle",fmtH(calc.chargeH),C.cyan],["Capacité effective",fmtH(calc.capH),C.whiteMid]].map(([l,v,c])=>(
+                      <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:"8px"}}>
+                        <span style={{fontSize:"12px",color:C.whiteMid}}>{l}</span>
+                        <span style={{fontSize:"14px",fontWeight:700,fontFamily:"'DM Mono',monospace",color:c}}>{v}</span>
+                      </div>
+                    ))}
+                    <div style={{height:"10px",background:C.blackBorder,borderRadius:"5px",overflow:"hidden",marginTop:"10px"}}>
+                      <div style={{height:"100%",width:`${Math.min(100,calc.tauxC)}%`,background:calc.tauxC>90?C.red:calc.tauxC>70?C.amber:C.green,borderRadius:"5px"}}/>
+                    </div>
+                    <div style={{textAlign:"right",fontSize:"11px",color:C.whiteMid,marginTop:"4px"}}>Taux de charge : <strong style={{color:calc.tauxC>90?C.red:calc.tauxC>70?C.amber:C.green}}>{calc.tauxC.toFixed(0)}%</strong></div>
+                  </div>
+                </div>
+
+                {/* Points bloquants */}
+                {Object.entries(etapesData).some(([,d])=>d.note?.includes("!"))&&(
+                  <div style={{padding:"14px 16px",background:C.amberDim,border:`1px solid ${C.amber}50`,borderRadius:"8px",marginBottom:"14px"}}>
+                    <div style={{fontSize:"10px",fontWeight:700,color:C.amber,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"10px"}}>Points bloquants identifiés</div>
+                    {ETAPES_DEF.map(e=>{const d=etapesData[e.id];if(!d?.note?.includes("!"))return null;return(<div key={e.id} style={{fontSize:"12px",color:C.white,marginBottom:"5px"}}><strong style={{color:e.color}}>{e.label}</strong> — {d.note}</div>);})}
+                  </div>
+                )}
+
+                {/* Notes */}
+                {(notes.general||notes.postrdv)&&(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px",marginBottom:"14px"}}>
+                    {[["Notes de réunion","general"],["Actions post-RDV","postrdv"]].map(([lbl,key])=>notes[key]&&(
+                      <div key={key} style={{padding:"14px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`}}>
+                        <div style={{fontSize:"10px",fontWeight:700,color:C.whiteMid,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"8px"}}>{lbl}</div>
+                        <p style={{fontSize:"12px",color:C.whiteMid,lineHeight:1.6}}>{notes[key]}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Signaux commerciaux consolidés + Placeholder NEXT360 */}
+                {(()=>{
+                  const allTagsFlat = ETAPES_DEF.flatMap(e=>{
+                    const d=etapesData[e.id]||{};
+                    return (d.signalTags||[]).map(tid=>({tid,etape:e}));
+                  });
+                  const byTag = SIGNAL_TAGS.map(t=>({...t,etapes:allTagsFlat.filter(x=>x.tid===t.id).map(x=>x.etape)})).filter(t=>t.etapes.length>0);
+                  return byTag.length>0?(
+                    <div style={{padding:"12px 16px",background:C.blackSurf,borderRadius:"8px",border:`1px solid ${C.blackBorder}`,marginBottom:"14px"}}>
+                      <div style={{fontSize:"9px",fontWeight:700,color:C.whiteMid,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"8px"}}>Signaux identifiés en RDV</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
+                        {byTag.map(t=>(
+                          <div key={t.id} style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                            <span style={{fontSize:"11px",fontWeight:700,color:t.color,minWidth:"140px",fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.03em"}}>{t.icon} {t.label}</span>
+                            <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
+                              {t.etapes.map(e=><Tag key={e.id} color={e.color}>{e.shortLabel}</Tag>)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ):null;
+                })()}
+                <div style={{padding:"16px 20px",border:`1px dashed ${C.cyanBorder}`,borderRadius:"8px",textAlign:"center",background:C.cyanDim}}>
+                  <div style={{fontSize:"14px",fontWeight:800,color:C.cyan,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:"0.06em"}}>PROJECTION NEXT360 · À compléter avec les métriques SMLB</div>
+                  <div style={{fontSize:"11px",color:C.whiteMid,marginTop:"3px"}}>Comparaison situation actuelle vs NEXT360 — calcul des économies envisageables et ROI d'adoption</div>
+                </div>
+              </div>{/* fin dashboard visuel */}
+
+              {/* Notes dans l'interface */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px",marginTop:"16px"}}>
+                {[["Notes de réunion","general","Observations, enjeux exprimés, signaux identifiés…"],["Actions post-RDV","postrdv","Prochaines étapes, décideurs, angle NEXT360 à valoriser…"]].map(([lbl,key,ph])=>(
+                  <Card key={key}>
+                    <Lbl>{lbl}</Lbl>
+                    <textarea value={notes[key]} onChange={e=>setNotes(n=>({...n,[key]:e.target.value}))} placeholder={ph} rows={5}
+                      style={{width:"100%",padding:"10px 12px",border:`1px solid ${C.blackBorder}`,borderRadius:"7px",fontSize:"13px",color:C.white,background:C.blackSurf,lineHeight:1.6,resize:"vertical"}}/>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(ConsoleV4));
+  </script>
+</body>
+</html>
